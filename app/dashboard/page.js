@@ -63,10 +63,16 @@ export default function DashboardPage() {
     loadBookings(selected);
   }
 
+  async function archiveCancelled(id) {
+    await supabase.from("bookings").update({ status: "archived" }).eq("id", id);
+    loadBookings(selected);
+  }
+
   const restaurant = restaurants.find((r) => r.id === selected);
   const pending = bookings.filter((b) => b.status === "pending");
   const confirmed = bookings.filter((b) => b.status === "confirmed");
   const noShows = bookings.filter((b) => b.status === "no-show");
+  const cancelled = bookings.filter((b) => b.status === "cancelled");
   const platformCut = (fee) => Math.round(fee * 0.18);
 
   return (
@@ -220,6 +226,36 @@ export default function DashboardPage() {
                   </div>
                 );
               })}
+            </div>
+          </>
+        )}
+
+        {cancelled.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 mb-2 mt-5">
+              <span className="text-[10px] uppercase tracking-widest font-medium text-neutral-500">
+                Cancelled by guest
+              </span>
+              <span className="text-[10px] rounded-full px-1.5 bg-neutral-200 text-neutral-600">{cancelled.length}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {cancelled.map((b) => (
+                <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200 flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-1">
+                    <span className="text-sm font-medium text-neutral-500">
+                      {b.guest_name} · {b.party_size} guests
+                    </span>
+                    <span className="text-xs text-neutral-400">{b.booking_time} · table freed</span>
+                  </div>
+                  <button
+                    onClick={() => archiveCancelled(b.id)}
+                    className="w-6 h-6 rounded-full flex items-center justify-center bg-neutral-200 ml-3 flex-shrink-0"
+                    aria-label="Dismiss"
+                  >
+                    <X size={13} className="text-neutral-600" />
+                  </button>
+                </div>
+              ))}
             </div>
           </>
         )}

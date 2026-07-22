@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 import { Search, Star, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Copy, Compass, BookMarked } from "lucide-react";
-import { addMyBookingId, getMyBookingIds } from "../lib/myBookings";
+import { addMyBookingId, getMyBookingIds, removeMyBookingId } from "../lib/myBookings";
+import { canFreelyCancel } from "../lib/bookingTime";
 
 const OCCASIONS = [
   { label: "None", icon: null },
@@ -30,7 +31,7 @@ export default function DinerPage() {
   const [time, setTime] = useState(TIMES[2]);
   const [zone, setZone] = useState(null);
   const [occasion, setOccasion] = useState("None");
-  const [tab, setTab] = useState("discover"); // "discover" | "myBookings"
+  const [tab, setTab] = useState("discover");
   const [myBookings, setMyBookings] = useState([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -38,7 +39,6 @@ export default function DinerPage() {
   const [lastBooking, setLastBooking] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
 
-  // Load restaurants from Supabase on first render
   useEffect(() => {
     async function loadRestaurants() {
       const { data, error } = await supabase.from("restaurants").select("*");
@@ -65,6 +65,8 @@ export default function DinerPage() {
   }
 
   async function confirmBooking() {
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const { data, error } = await supabase
       .from("bookings")
       .insert({
@@ -75,6 +77,7 @@ export default function DinerPage() {
         zone: zone,
         occasion: occasion === "None" ? null : occasion,
         booking_time: time,
+        booking_date: localDate,
         card_last4: cardNumber.slice(-4) || "4242",
         status: "pending",
       })
@@ -97,20 +100,31 @@ export default function DinerPage() {
       setMyBookings([]);
       return;
     }
-    const { data } = await supabase.from("bookings").select("*, restaurants(name, area)").in("id", ids);
-    // Keep them ordered newest-saved-first, matching the local id order
+    const { data } = await supabase.from("bookings").select("*, restaurants(name, area, cancellation_notice_hours)").in("id", ids);
     const ordered = ids.map((id) => data?.find((b) => b.id === id)).filter(Boolean);
     setMyBookings(ordered);
   }
 
   function shareBooking(booking) {
     const url = `${window.location.origin}/booking/${booking.id}`;
+    const restaurantName = booking.restaurants?.name || active?.name || "our table";
     if (navigator.share) {
-      navigator.share({ title: "My reservation", text: `Join me at ${active.name}`, url }).catch(() => {});
+      navigator.share({ title: "My reservation", text: `Join me at ${restaurantName}`, url }).catch(() => {});
     } else {
       navigator.clipboard.writeText(url);
       alert("Link copied — send it to your friends!");
     }
+  }
+
+  async function cancelBooking(id) {
+    if (!confirm("Cancel this reservation? The restaurant will be notified right away.")) return;
+    await supabase.from("bookings").update({ status: "cancelled" }).eq("id", id);
+    loadMyBookings();
+  }
+
+  function removeFromMyBookings(id) {
+    removeMyBookingId(id);
+    loadMyBookings();
   }
 
   useEffect(() => {
@@ -368,7 +382,7 @@ export default function DinerPage() {
             <AlertTriangle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-amber-800">
               <span className="font-medium">No-show fee: AED {active.no_show_fee_aed} per guest.</span>{" "}
-              Free to cancel up to 2 hours before your booking.
+              Free to cancel up to {active.cancellation_notice_hours ?? 2} hours before your booking.
             </div>
           </div>
 
@@ -464,23 +478,45 @@ export default function DinerPage() {
                 <div className="text-xs text-neutral-500 mb-3">
                   {b.restaurants?.area} · {b.booking_time} · {b.zone} · {b.party_size} guests
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between mb-3">
                   <span
                     className={`text-xs font-medium ${
                       b.status === "confirmed"
                         ? "text-green-700"
-                        : b.status === "declined"
+                        : b.status === "declined" || b.status === "cancelled"
+                        ? "text-red-700"
+                        : b.status === "no-show"
                         ? "text-red-700"
                         : "text-amber-700"
                     }`}
                   >
-                    {b.status === "pending" ? "Awaiting confirmation" : b.status}
+                    {b.status === "pending"
+                      ? "Awaiting confirmation"
+                      : b.status === "cancelled"
+                      ? "Cancelled"
+                      : b.status}
                   </span>
                   <button
                     onClick={() => shareBooking(b)}
                     className="flex items-center gap-1 text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink"
                   >
                     <Share2 size={12} /> Share
+                  </button>
+                </div>
+                <div className="flex gap-2">
+                  {canFreelyCancel(b, b.restaurants?.cancellation_notice_hours ?? 2) && (
+                    <button
+                      onClick={() => cancelBooking(b.id)}
+                      className="flex-1 text-xs rounded-full px-3 py-2 bg-red-50 text-red-700 border border-red-200"
+                    >
+                      Cancel reservation
+                    </button>
+                  )}
+                  <button
+                    onClick={() => removeFromMyBookings(b.id)}
+                    className="flex-1 text-xs rounded-full px-3 py-2 bg-neutral-100 text-neutral-600"
+                  >
+                    Remove
                   </button>
                 </div>
               </div>
