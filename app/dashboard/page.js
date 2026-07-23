@@ -1,13 +1,34 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
-import { Check, X, Clock, CalendarDays, LayoutDashboard } from "lucide-react";
+import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut } from "lucide-react";
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const [checkingAuth, setCheckingAuth] = useState(true);
   const [restaurants, setRestaurants] = useState([]);
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
+
+  // Require a logged-in restaurant owner before showing anything
+  useEffect(() => {
+    async function checkAuth() {
+      const { data } = await supabase.auth.getSession();
+      if (!data.session) {
+        router.push("/dashboard/login");
+        return;
+      }
+      setCheckingAuth(false);
+    }
+    checkAuth();
+  }, [router]);
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/dashboard/login");
+  }
 
   const loadBookings = useCallback(async (restaurantId) => {
     if (!restaurantId) return;
@@ -19,19 +40,27 @@ export default function DashboardPage() {
     setBookings(data || []);
   }, []);
 
+  // Load restaurant list once
   useEffect(() => {
+    if (checkingAuth) return;
     async function load() {
-      const { data } = await supabase.from("restaurants").select("*");
+      const { data: userData } = await supabase.auth.getUser();
+      const { data } = await supabase
+        .from("restaurants")
+        .select("*")
+        .eq("owner_id", userData.user?.id);
       setRestaurants(data || []);
       if (data && data.length > 0) setSelected(data[0].id);
     }
     load();
-  }, []);
+  }, [checkingAuth]);
 
+  // Load bookings whenever the selected restaurant changes
   useEffect(() => {
     loadBookings(selected);
   }, [selected, loadBookings]);
 
+  // Live updates: refresh bookings whenever a row changes for this restaurant
   useEffect(() => {
     if (!selected) return;
     const channel = supabase
@@ -75,24 +104,43 @@ export default function DashboardPage() {
   const cancelled = bookings.filter((b) => b.status === "cancelled");
   const platformCut = (fee) => Math.round(fee * 0.18);
 
+  if (checkingAuth) {
+    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">Loading…</div>;
+  }
+
   return (
     <div className="mx-auto max-w-2xl min-h-screen bg-white">
       <div className="px-6 py-4 flex items-center justify-between bg-teal">
         <div className="flex items-center gap-2 text-ivory text-sm font-medium">
           <LayoutDashboard size={18} className="text-brass" /> Partner dashboard
         </div>
-        <select
-          value={selected || ""}
-          onChange={(e) => setSelected(e.target.value)}
-          className="text-xs rounded-md px-2 py-1 outline-none bg-teal text-ivory border border-white/20"
-        >
-          {restaurants.map((r) => (
-            <option key={r.id} value={r.id} className="text-ink">
-              {r.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={selected || ""}
+            onChange={(e) => setSelected(e.target.value)}
+            className="text-xs rounded-md px-2 py-1 outline-none bg-teal text-ivory border border-white/20"
+          >
+            {restaurants.map((r) => (
+              <option key={r.id} value={r.id} className="text-ink">
+                {r.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={handleSignOut}
+            className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
+            aria-label="Sign out"
+          >
+            <LogOut size={14} className="text-ivory" />
+          </button>
+        </div>
       </div>
+
+      {restaurants.length === 0 && (
+        <div className="px-6 py-10 text-sm text-neutral-500">
+          No restaurant is linked to your account yet. If you believe this is a mistake, contact support.
+        </div>
+      )}
 
       {restaurant && (
         <div className="px-6 pt-5 pb-2">
