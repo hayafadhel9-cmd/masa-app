@@ -2,18 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { Search, Star, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Copy, Compass, BookMarked } from "lucide-react";
+import { Search, Star, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Copy, Compass, BookMarked, Globe } from "lucide-react";
 import { addMyBookingId, getMyBookingIds, removeMyBookingId } from "../lib/myBookings";
 import { canFreelyCancel } from "../lib/bookingTime";
-
-const OCCASIONS = [
-  { label: "None", icon: null },
-  { label: "Birthday", icon: Cake },
-  { label: "Anniversary", icon: Heart },
-  { label: "Business", icon: Briefcase },
-];
-
-const TIMES = ["6:00 PM", "6:30 PM", "7:00 PM", "7:30 PM", "8:00 PM", "8:30 PM", "9:00 PM", "9:30 PM"];
+import { generateTimeSlots } from "../lib/timeSlots";
+import { useLanguage } from "../lib/LanguageContext";
 
 const ZONE_ICONS = {
   Indoor: Home,
@@ -21,17 +14,32 @@ const ZONE_ICONS = {
   "Shisha Terrace": Wind,
 };
 
+const ZONE_KEYS = {
+  Indoor: { label: "indoor", desc: "indoorDesc" },
+  Outdoor: { label: "outdoor", desc: "outdoorDesc" },
+  "Shisha Terrace": { label: "shishaTerrace", desc: "shishaDesc" },
+};
+
 export default function DinerPage() {
+  const { lang, setLang, t } = useLanguage();
+
+  const OCCASIONS = [
+    { label: "None", key: "occasionNone", icon: null },
+    { label: "Birthday", key: "occasionBirthday", icon: Cake },
+    { label: "Anniversary", key: "occasionAnniversary", icon: Heart },
+    { label: "Business", key: "occasionBusiness", icon: Briefcase },
+  ];
+
   const [restaurants, setRestaurants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState("home");
   const [active, setActive] = useState(null);
   const [query, setQuery] = useState("");
   const [party, setParty] = useState(2);
-  const [time, setTime] = useState(TIMES[2]);
+  const [time, setTime] = useState("");
   const [zone, setZone] = useState(null);
   const [occasion, setOccasion] = useState("None");
-  const [tab, setTab] = useState("discover");
+  const [tab, setTab] = useState("discover"); // "discover" | "myBookings"
   const [myBookings, setMyBookings] = useState([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -55,6 +63,10 @@ export default function DinerPage() {
   async function openRestaurant(r) {
     setActive(r);
     setZone((r.zones && r.zones[0]) || "Indoor");
+    const slots = generateTimeSlots(r.opening_time, r.closing_time);
+    setTime(slots[0]);
+    const sizes = r.party_sizes && r.party_sizes.length > 0 ? r.party_sizes : [2, 4, 6, 8];
+    setParty(sizes[0]);
     const { data } = await supabase
       .from("menu_items")
       .select("*")
@@ -144,29 +156,34 @@ export default function DinerPage() {
     <div className="mx-auto max-w-md min-h-screen bg-ivory px-5 pb-24 relative">
       {tab === "discover" && screen === "home" && (
         <>
-          <h1 className="font-serif text-2xl pt-6 mb-1 text-ink">
-            Downtown &amp; DIFC's finest,
-            <br />held for you tonight.
-          </h1>
-          <p className="text-sm mb-4 text-neutral-600">No calling ahead. No walk-in gamble.</p>
+          <div className="flex items-center justify-between pt-6 mb-1">
+            <h1 className="font-serif text-2xl text-ink">
+              {t("headline1")}
+              <br />{t("headline2")}
+            </h1>
+            <button
+              onClick={() => setLang(lang === "en" ? "ar" : "en")}
+              className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0 ml-2"
+            >
+              <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
+            </button>
+          </div>
+          <p className="text-sm mb-4 text-neutral-600">{t("subheadline")}</p>
 
           <div className="flex items-center gap-2 rounded-full px-4 py-2.5 mb-4 bg-white border border-neutral-200">
             <Search size={16} className="text-neutral-400" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search restaurant or cuisine"
+              placeholder={t("searchPlaceholder")}
               className="flex-1 bg-transparent outline-none text-sm"
             />
           </div>
 
-          {loading && <p className="text-sm text-neutral-500">Loading restaurants…</p>}
+          {loading && <p className="text-sm text-neutral-500">{t("loadingRestaurants")}</p>}
 
           {!loading && filtered.length === 0 && (
-            <p className="text-sm text-neutral-500 py-8 text-center">
-              No restaurants yet — add some rows to the `restaurants` table in Supabase
-              to see them here.
-            </p>
+            <p className="text-sm text-neutral-500 py-8 text-center">{t("noRestaurants")}</p>
           )}
 
           <div className="flex flex-col gap-3">
@@ -185,7 +202,7 @@ export default function DinerPage() {
                   </div>
                   {r.subscription_status === "trial" && (
                     <span className="text-[10px] rounded-full px-2 py-1 bg-amber-100 text-amber-700">
-                      Trial partner
+                      {t("trialPartner")}
                     </span>
                   )}
                 </div>
@@ -198,7 +215,7 @@ export default function DinerPage() {
       {tab === "discover" && screen === "restaurant" && active && (
         <div className="pt-4">
           <button onClick={() => setScreen("home")} className="flex items-center gap-1 text-sm text-teal py-2">
-            <ChevronLeft size={16} /> Back
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
           <h2 className="font-serif text-2xl text-ink">{active.name}</h2>
           <div className="text-xs mt-1 mb-4 flex items-center gap-2 text-neutral-500">
@@ -206,11 +223,11 @@ export default function DinerPage() {
           </div>
 
           <div className="text-[10px] uppercase tracking-widest mb-2 text-neutral-400">
-            Menu highlights
+            {t("menuHighlights")}
           </div>
           <div className="flex flex-col gap-2 mb-5">
             {menuItems.length === 0 && (
-              <p className="text-sm text-neutral-400">No menu items added yet.</p>
+              <p className="text-sm text-neutral-400">{t("noMenuItems")}</p>
             )}
             {menuItems.map((m) => (
               <div key={m.id} className="flex items-center justify-between text-sm py-2 border-b border-dashed border-neutral-200">
@@ -224,7 +241,7 @@ export default function DinerPage() {
             onClick={() => setScreen("book")}
             className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory"
           >
-            Reserve a table
+            {t("reserveTable")}
           </button>
         </div>
       )}
@@ -232,13 +249,13 @@ export default function DinerPage() {
       {tab === "discover" && screen === "book" && active && (
         <div className="pt-4">
           <button onClick={() => setScreen("restaurant")} className="flex items-center gap-1 text-sm text-teal py-2">
-            <ChevronLeft size={16} /> Back
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
-          <h2 className="font-serif text-xl mb-4 text-ink">Reserve at {active.name}</h2>
+          <h2 className="font-serif text-xl mb-4 text-ink">{t("reserveAt")} {active.name}</h2>
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Party size</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("partySize")}</label>
           <div className="flex gap-2 mt-2 mb-4">
-            {[2, 4, 6, 8].map((p) => (
+            {(active.party_sizes && active.party_sizes.length > 0 ? active.party_sizes : [2, 4, 6, 8]).map((p) => (
               <button
                 key={p}
                 onClick={() => setParty(p)}
@@ -251,22 +268,24 @@ export default function DinerPage() {
             ))}
           </div>
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Time tonight</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
+            {t("timeTonight")} ({active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"})
+          </label>
           <div className="grid grid-cols-4 gap-2 mt-2 mb-4">
-            {TIMES.map((t) => (
+            {generateTimeSlots(active.opening_time, active.closing_time).map((tm) => (
               <button
-                key={t}
-                onClick={() => setTime(t)}
+                key={tm}
+                onClick={() => setTime(tm)}
                 className={`rounded-lg py-2 text-xs border ${
-                  time === t ? "bg-teal text-ivory border-teal" : "bg-white text-ink border-neutral-200"
+                  time === tm ? "bg-teal text-ivory border-teal" : "bg-white text-ink border-neutral-200"
                 }`}
               >
-                {t}
+                {tm}
               </button>
             ))}
           </div>
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Celebrating anything?</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("celebrating")}</label>
           <div className="grid grid-cols-4 gap-2 mt-2 mb-4">
             {OCCASIONS.map((o) => {
               const Icon = o.icon;
@@ -280,21 +299,21 @@ export default function DinerPage() {
                   }`}
                 >
                   {Icon ? <Icon size={14} /> : <span className="h-[14px]" />}
-                  {o.label}
+                  {t(o.key)}
                 </button>
               );
             })}
           </div>
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Your name</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("yourName")}</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Full name"
+            placeholder={t("fullName")}
             className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 mb-4 outline-none bg-white border border-neutral-200"
           />
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Mobile number</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("mobileNumber")}</label>
           <input
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
@@ -306,7 +325,7 @@ export default function DinerPage() {
             onClick={() => setScreen("zone")}
             className="w-full rounded-full py-3 text-sm font-medium bg-brass text-ink"
           >
-            Continue to choose seating
+            {t("continueSeating")}
           </button>
         </div>
       )}
@@ -314,9 +333,9 @@ export default function DinerPage() {
       {tab === "discover" && screen === "zone" && active && (
         <div className="pt-4">
           <button onClick={() => setScreen("book")} className="flex items-center gap-1 text-sm text-teal py-2">
-            <ChevronLeft size={16} /> Back
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
-          <h2 className="font-serif text-xl mb-1 text-ink">Where would you like to sit?</h2>
+          <h2 className="font-serif text-xl mb-1 text-ink">{t("whereSit")}</h2>
           <p className="text-sm mb-4 text-neutral-500">
             {active.name} · {party} guests · {time}
           </p>
@@ -325,6 +344,7 @@ export default function DinerPage() {
             {(active.zones && active.zones.length > 0 ? active.zones : ["Indoor"]).map((z) => {
               const Icon = ZONE_ICONS[z] || Home;
               const selected = zone === z;
+              const zk = ZONE_KEYS[z] || { label: null, desc: null };
               return (
                 <button
                   key={z}
@@ -341,13 +361,11 @@ export default function DinerPage() {
                     <Icon size={18} className={selected ? "text-brass" : "text-neutral-500"} />
                   </div>
                   <div>
-                    <div className={`text-sm font-medium ${selected ? "text-ivory" : "text-ink"}`}>{z}</div>
+                    <div className={`text-sm font-medium ${selected ? "text-ivory" : "text-ink"}`}>
+                      {zk.label ? t(zk.label) : z}
+                    </div>
                     <div className={`text-xs ${selected ? "text-ivory/70" : "text-neutral-500"}`}>
-                      {z === "Shisha Terrace"
-                        ? "Open-air, may carry a minimum spend"
-                        : z === "Outdoor"
-                        ? "Al fresco seating"
-                        : "Climate-controlled dining room"}
+                      {zk.desc ? t(zk.desc) : ""}
                     </div>
                   </div>
                 </button>
@@ -359,7 +377,7 @@ export default function DinerPage() {
             onClick={() => setScreen("hold")}
             className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory"
           >
-            Continue to secure table
+            {t("continueSecure")}
           </button>
         </div>
       )}
@@ -367,26 +385,27 @@ export default function DinerPage() {
       {tab === "discover" && screen === "hold" && active && (
         <div className="pt-4">
           <button onClick={() => setScreen("book")} className="flex items-center gap-1 text-sm text-teal py-2">
-            <ChevronLeft size={16} /> Back
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
           <div className="flex items-center gap-2 mb-1">
             <ShieldCheck size={18} className="text-teal" />
-            <h2 className="font-serif text-xl text-ink">Secure your table</h2>
+            <h2 className="font-serif text-xl text-ink">{t("secureTable")}</h2>
           </div>
           <p className="text-sm mb-4 text-neutral-600">
-            {active.name} holds this table for you. A card is required — you're only
-            charged if you don't show up.
+            {active.name} {t("holdsTable")}
           </p>
 
           <div className="rounded-xl p-4 mb-5 flex items-start gap-3 bg-amber-50 border border-amber-200">
             <AlertTriangle size={16} className="text-amber-700 mt-0.5 flex-shrink-0" />
             <div className="text-xs text-amber-800">
-              <span className="font-medium">No-show fee: AED {active.no_show_fee_aed} per guest.</span>{" "}
-              Free to cancel up to {active.cancellation_notice_hours ?? 2} hours before your booking.
+              <span className="font-medium">
+                {t("noShowFeeLabel", { fee: active.no_show_fee_aed })}
+              </span>{" "}
+              {t("freeCancelLabel", { hours: active.cancellation_notice_hours ?? 2 })}
             </div>
           </div>
 
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Card number</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("cardNumber")}</label>
           <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 mb-6 bg-white border border-neutral-200">
             <CreditCard size={16} className="text-neutral-400" />
             <input
@@ -401,13 +420,9 @@ export default function DinerPage() {
             onClick={confirmBooking}
             className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory mb-3"
           >
-            Confirm &amp; hold table
+            {t("confirmHold")}
           </button>
-          <p className="text-[11px] text-center text-neutral-400">
-            Card is captured as text here for the prototype. Swap this input for
-            Stripe Elements before going live — never send raw card numbers to
-            your own database.
-          </p>
+          <p className="text-[11px] text-center text-neutral-400">{t("cardDisclaimer")}</p>
         </div>
       )}
 
@@ -416,22 +431,22 @@ export default function DinerPage() {
           <div className="w-14 h-14 rounded-full flex items-center justify-center mb-4 bg-teal">
             <Check className="text-brass" size={26} />
           </div>
-          <h2 className="font-serif text-xl mb-1 text-ink">Table requested</h2>
+          <h2 className="font-serif text-xl mb-1 text-ink">{t("tableRequested")}</h2>
           <p className="text-sm mb-6 text-neutral-600">
-            {active.name} has been notified and will confirm shortly.
+            {active.name} {t("hasBeenNotified")}
           </p>
           <div className="w-full rounded-xl p-4 text-sm text-left mb-6 bg-white border border-neutral-200">
             <div className="flex justify-between py-1">
-              <span className="text-neutral-500">Seating</span>
+              <span className="text-neutral-500">{t("seating")}</span>
               <span className="text-ink">{lastBooking.zone}</span>
             </div>
             <div className="flex justify-between py-1">
-              <span className="text-neutral-500">Time</span>
+              <span className="text-neutral-500">{t("time")}</span>
               <span className="text-ink">{lastBooking.booking_time}</span>
             </div>
             {lastBooking.occasion && (
               <div className="flex justify-between py-1">
-                <span className="text-neutral-500">Occasion</span>
+                <span className="text-neutral-500">{t("occasion")}</span>
                 <span className="text-ink">{lastBooking.occasion}</span>
               </div>
             )}
@@ -440,28 +455,24 @@ export default function DinerPage() {
             onClick={() => shareBooking(lastBooking)}
             className="w-full rounded-full py-3 text-sm font-medium mb-3 flex items-center justify-center gap-2 bg-brass text-ink"
           >
-            <Share2 size={15} /> Share with friends
+            <Share2 size={15} /> {t("shareFriends")}
           </button>
           <button
             onClick={() => setScreen("home")}
             className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory"
           >
-            Done
+            {t("done")}
           </button>
         </div>
       )}
 
       {tab === "myBookings" && (
         <div className="pt-6">
-          <h2 className="font-serif text-2xl mb-1 text-ink">My Bookings</h2>
-          <p className="text-sm mb-4 text-neutral-500">
-            Saved on this phone — reservations you've made or that friends shared with you.
-          </p>
+          <h2 className="font-serif text-2xl mb-1 text-ink">{t("myBookings")}</h2>
+          <p className="text-sm mb-4 text-neutral-500">{t("myBookingsDesc")}</p>
 
           {myBookings.length === 0 && (
-            <p className="text-sm text-neutral-400 py-8 text-center">
-              Nothing here yet — book a table, or open a link a friend shared with you.
-            </p>
+            <p className="text-sm text-neutral-400 py-8 text-center">{t("myBookingsEmpty")}</p>
           )}
 
           <div className="flex flex-col gap-3">
@@ -491,16 +502,16 @@ export default function DinerPage() {
                     }`}
                   >
                     {b.status === "pending"
-                      ? "Awaiting confirmation"
+                      ? t("awaitingConfirmation")
                       : b.status === "cancelled"
-                      ? "Cancelled"
+                      ? t("cancelled")
                       : b.status}
                   </span>
                   <button
                     onClick={() => shareBooking(b)}
                     className="flex items-center gap-1 text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink"
                   >
-                    <Share2 size={12} /> Share
+                    <Share2 size={12} /> {t("share")}
                   </button>
                 </div>
                 <div className="flex gap-2">
@@ -509,14 +520,14 @@ export default function DinerPage() {
                       onClick={() => cancelBooking(b.id)}
                       className="flex-1 text-xs rounded-full px-3 py-2 bg-red-50 text-red-700 border border-red-200"
                     >
-                      Cancel reservation
+                      {t("cancelReservation")}
                     </button>
                   )}
                   <button
                     onClick={() => removeFromMyBookings(b.id)}
                     className="flex-1 text-xs rounded-full px-3 py-2 bg-neutral-100 text-neutral-600"
                   >
-                    Remove
+                    {t("remove")}
                   </button>
                 </div>
               </div>
@@ -533,7 +544,7 @@ export default function DinerPage() {
               tab === "discover" ? "bg-teal text-ivory" : "text-neutral-500"
             }`}
           >
-            <Compass size={14} /> Discover
+            <Compass size={14} /> {t("discover")}
           </button>
           <button
             onClick={() => setTab("myBookings")}
@@ -541,7 +552,7 @@ export default function DinerPage() {
               tab === "myBookings" ? "bg-teal text-ivory" : "text-neutral-500"
             }`}
           >
-            <BookMarked size={14} /> My Bookings
+            <BookMarked size={14} /> {t("myBookings")}
           </button>
         </div>
       </div>

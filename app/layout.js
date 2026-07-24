@@ -1,4 +1,5 @@
 import "./globals.css";
+import Providers from "./providers";
 
 export const metadata = {
   title: "Masa — Downtown & DIFC reservations",
@@ -8,7 +9,9 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="bg-sand">{children}</body>
+      <body className="bg-sand">
+        <Providers>{children}</Providers>
+      </body>
     </html>
   );
 }

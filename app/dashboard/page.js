@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
-import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut } from "lucide-react";
+import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings } from "lucide-react";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -126,6 +126,13 @@ export default function DashboardPage() {
               </option>
             ))}
           </select>
+          <button
+            onClick={() => router.push("/dashboard/settings")}
+            className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
+            aria-label="Settings"
+          >
+            <Settings size={14} className="text-ivory" />
+          </button>
           <button
             onClick={handleSignOut}
             className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"

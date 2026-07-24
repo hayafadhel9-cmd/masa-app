@@ -54,7 +54,7 @@ export default function DashboardLoginPage() {
     }
 
     setLoading(false);
-    router.push("/dashboard");
+    router.push("/dashboard/settings?onboarding=true");
   }
 
   return (
