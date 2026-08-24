@@ -35,6 +35,10 @@ function RestaurantSettingsInner() {
   const [openingTime, setOpeningTime] = useState("18:00");
   const [closingTime, setClosingTime] = useState("21:30");
   const [partySizes, setPartySizes] = useState([2, 4, 6, 8]);
+  const [minAdvanceDays, setMinAdvanceDays] = useState(0);
+  const [maxAdvanceDays, setMaxAdvanceDays] = useState(30);
+  const [maxPartySize, setMaxPartySize] = useState(14);
+  const [zoneCapacity, setZoneCapacity] = useState({});
 
   useEffect(() => {
     async function load() {
@@ -62,6 +66,10 @@ function RestaurantSettingsInner() {
         setOpeningTime(data.opening_time || "18:00");
         setClosingTime(data.closing_time || "21:30");
         setPartySizes(data.party_sizes && data.party_sizes.length > 0 ? data.party_sizes : [2, 4, 6, 8]);
+        setMinAdvanceDays(data.min_advance_days ?? 0);
+        setMaxAdvanceDays(data.max_advance_days ?? 30);
+        setMaxPartySize(data.max_party_size ?? 14);
+        setZoneCapacity(data.zone_capacity || {});
       }
       setCheckingAuth(false);
     }
@@ -78,11 +86,19 @@ function RestaurantSettingsInner() {
     );
   }
 
+  function setZoneCapacityValue(zone, value) {
+    setZoneCapacity((prev) => ({ ...prev, [zone]: value }));
+  }
+
   async function handleSave(e) {
     e.preventDefault();
     if (!restaurant) return;
     setSaving(true);
     setSavedMsg("");
+    const cleanedCapacity = {};
+    zones.forEach((z) => {
+      cleanedCapacity[z] = Number(zoneCapacity[z]) || 0;
+    });
     const { error } = await supabase
       .from("restaurants")
       .update({
@@ -96,6 +112,10 @@ function RestaurantSettingsInner() {
         opening_time: openingTime,
         closing_time: closingTime,
         party_sizes: partySizes.length > 0 ? partySizes : [2, 4, 6, 8],
+        min_advance_days: Number(minAdvanceDays),
+        max_advance_days: Number(maxAdvanceDays),
+        max_party_size: Number(maxPartySize),
+        zone_capacity: cleanedCapacity,
       })
       .eq("id", restaurant.id);
     setSaving(false);
@@ -190,6 +210,37 @@ function RestaurantSettingsInner() {
         </div>
 
         <div>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
+            How far ahead can diners book?
+          </label>
+          <div className="flex gap-2 mt-2 items-center">
+            <div className="flex-1">
+              <span className="text-[10px] text-neutral-400">Minimum notice (days)</span>
+              <input
+                type="number"
+                min="0"
+                value={minAdvanceDays}
+                onChange={(e) => setMinAdvanceDays(e.target.value)}
+                className="w-full rounded-lg px-3 py-2.5 text-sm mt-1 outline-none bg-white border border-neutral-200"
+              />
+            </div>
+            <div className="flex-1">
+              <span className="text-[10px] text-neutral-400">Maximum window (days)</span>
+              <input
+                type="number"
+                min="0"
+                value={maxAdvanceDays}
+                onChange={(e) => setMaxAdvanceDays(e.target.value)}
+                className="w-full rounded-lg px-3 py-2.5 text-sm mt-1 outline-none bg-white border border-neutral-200"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-neutral-400 mt-1">
+            0 minimum means same-day bookings are allowed. E.g. 0 to 30 lets diners book anywhere from tonight to a month out.
+          </p>
+        </div>
+
+        <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">Booking hours</label>
           <div className="flex gap-2 mt-2 items-center">
             <input
@@ -208,6 +259,22 @@ function RestaurantSettingsInner() {
           </div>
           <p className="text-[11px] text-neutral-400 mt-1">
             This is the window diners can pick a time slot within, in 30-minute steps.
+          </p>
+        </div>
+
+        <div>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
+            Largest group you can seat online
+          </label>
+          <input
+            type="number"
+            min="1"
+            value={maxPartySize}
+            onChange={(e) => setMaxPartySize(e.target.value)}
+            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
+          />
+          <p className="text-[11px] text-neutral-400 mt-1">
+            Diners can request any group size up to this number. Beyond it, they'll be told to contact you directly.
           </p>
         </div>
 
@@ -233,19 +300,37 @@ function RestaurantSettingsInner() {
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">Seating available</label>
           <div className="flex flex-col gap-2 mt-2">
             {ALL_ZONES.map((z) => (
-              <label
+              <div
                 key={z}
                 className="flex items-center gap-2 rounded-lg px-3 py-2.5 bg-white border border-neutral-200 text-sm"
               >
-                <input
-                  type="checkbox"
-                  checked={zones.includes(z)}
-                  onChange={() => toggleZone(z)}
-                />
-                {z}
-              </label>
+                <label className="flex items-center gap-2 flex-1">
+                  <input
+                    type="checkbox"
+                    checked={zones.includes(z)}
+                    onChange={() => toggleZone(z)}
+                  />
+                  {z}
+                </label>
+                {zones.includes(z) && (
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <input
+                      type="number"
+                      min="0"
+                      value={zoneCapacity[z] ?? ""}
+                      onChange={(e) => setZoneCapacityValue(z, e.target.value)}
+                      placeholder="0"
+                      className="w-16 rounded-md px-2 py-1 text-xs outline-none bg-neutral-50 border border-neutral-200 text-center"
+                    />
+                    <span className="text-[10px] text-neutral-400">tables</span>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
+          <p className="text-[11px] text-neutral-400 mt-1">
+            How many tables you have in each area. Diners will see a zone as fully booked once all its tables are taken for a given time.
+          </p>
         </div>
 
         <div>

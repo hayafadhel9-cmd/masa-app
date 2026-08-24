@@ -12,7 +12,6 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
 
-  // Require a logged-in restaurant owner before showing anything
   useEffect(() => {
     async function checkAuth() {
       const { data } = await supabase.auth.getSession();
@@ -36,11 +35,11 @@ export default function DashboardPage() {
       .from("bookings")
       .select("*")
       .eq("restaurant_id", restaurantId)
+      .order("booking_date")
       .order("booking_time");
     setBookings(data || []);
   }, []);
 
-  // Load restaurant list once
   useEffect(() => {
     if (checkingAuth) return;
     async function load() {
@@ -55,12 +54,10 @@ export default function DashboardPage() {
     load();
   }, [checkingAuth]);
 
-  // Load bookings whenever the selected restaurant changes
   useEffect(() => {
     loadBookings(selected);
   }, [selected, loadBookings]);
 
-  // Live updates: refresh bookings whenever a row changes for this restaurant
   useEffect(() => {
     if (!selected) return;
     const channel = supabase
@@ -191,7 +188,7 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <div className="text-xs flex items-center gap-1 mt-0.5 text-neutral-500">
-                  <Clock size={11} /> {b.booking_time} · {b.zone} · {b.guest_phone}
+                  <Clock size={11} /> {b.booking_date} · {b.booking_time} · {b.zone} · {b.guest_phone}
                 </div>
               </div>
               <div className="flex gap-1.5">
@@ -229,7 +226,7 @@ export default function DashboardPage() {
                   )}
                 </div>
                 <div className="text-xs flex items-center gap-1 mt-0.5 text-neutral-500">
-                  <CalendarDays size={11} /> {b.booking_time} · {b.zone} · card •••• {b.card_last4}
+                  <CalendarDays size={11} /> {b.booking_date} · {b.booking_time} · {b.zone} · card •••• {b.card_last4}
                 </div>
               </div>
               <button
@@ -300,7 +297,7 @@ export default function DashboardPage() {
                     <span className="text-sm font-medium text-neutral-500">
                       {b.guest_name} · {b.party_size} guests
                     </span>
-                    <span className="text-xs text-neutral-400">{b.booking_time} · table freed</span>
+                    <span className="text-xs text-neutral-400">{b.booking_date} · {b.booking_time} · table freed</span>
                   </div>
                   <button
                     onClick={() => archiveCancelled(b.id)}

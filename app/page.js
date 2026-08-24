@@ -20,6 +20,16 @@ const ZONE_KEYS = {
   "Shisha Terrace": { label: "shishaTerrace", desc: "shishaDesc" },
 };
 
+function toLocalDateStr(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
 export default function DinerPage() {
   const { lang, setLang, t } = useLanguage();
 
@@ -37,9 +47,10 @@ export default function DinerPage() {
   const [query, setQuery] = useState("");
   const [party, setParty] = useState(2);
   const [time, setTime] = useState("");
+  const [bookingDate, setBookingDate] = useState("");
   const [zone, setZone] = useState(null);
   const [occasion, setOccasion] = useState("None");
-  const [tab, setTab] = useState("discover"); // "discover" | "myBookings"
+  const [tab, setTab] = useState("discover");
   const [myBookings, setMyBookings] = useState([]);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -65,8 +76,9 @@ export default function DinerPage() {
     setZone((r.zones && r.zones[0]) || "Indoor");
     const slots = generateTimeSlots(r.opening_time, r.closing_time);
     setTime(slots[0]);
-    const sizes = r.party_sizes && r.party_sizes.length > 0 ? r.party_sizes : [2, 4, 6, 8];
-    setParty(sizes[0]);
+    const defaultDate = addDays(new Date(), r.min_advance_days ?? 0);
+    setBookingDate(toLocalDateStr(defaultDate));
+    setParty(2);
     const { data } = await supabase
       .from("menu_items")
       .select("*")
@@ -77,8 +89,6 @@ export default function DinerPage() {
   }
 
   async function confirmBooking() {
-    const now = new Date();
-    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const { data, error } = await supabase
       .from("bookings")
       .insert({
@@ -89,7 +99,7 @@ export default function DinerPage() {
         zone: zone,
         occasion: occasion === "None" ? null : occasion,
         booking_time: time,
-        booking_date: localDate,
+        booking_date: bookingDate,
         card_last4: cardNumber.slice(-4) || "4242",
         status: "pending",
       })
@@ -253,20 +263,41 @@ export default function DinerPage() {
           </button>
           <h2 className="font-serif text-xl mb-4 text-ink">{t("reserveAt")} {active.name}</h2>
 
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("date")}</label>
+          <input
+            type="date"
+            value={bookingDate}
+            min={toLocalDateStr(addDays(new Date(), active.min_advance_days ?? 0))}
+            max={toLocalDateStr(addDays(new Date(), active.max_advance_days ?? 30))}
+            onChange={(e) => setBookingDate(e.target.value)}
+            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 mb-4 outline-none bg-white border border-neutral-200"
+          />
+
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("partySize")}</label>
-          <div className="flex gap-2 mt-2 mb-4">
-            {(active.party_sizes && active.party_sizes.length > 0 ? active.party_sizes : [2, 4, 6, 8]).map((p) => (
-              <button
-                key={p}
-                onClick={() => setParty(p)}
-                className={`flex-1 rounded-lg py-2 text-sm flex items-center justify-center gap-1 border ${
-                  party === p ? "bg-teal text-ivory border-teal" : "bg-white text-ink border-neutral-200"
-                }`}
-              >
-                <Users size={13} /> {p}
-              </button>
-            ))}
+          <div className="flex items-center gap-3 mt-2 mb-4">
+            <button
+              type="button"
+              onClick={() => setParty(Math.max(1, party - 1))}
+              className="w-10 h-10 rounded-lg flex items-center justify-center bg-white border border-neutral-200 text-lg text-ink"
+            >
+              −
+            </button>
+            <div className="flex-1 flex items-center justify-center gap-2 rounded-lg py-2 bg-teal text-ivory">
+              <Users size={14} /> {party}
+            </div>
+            <button
+              type="button"
+              onClick={() => setParty(Math.min(active.max_party_size ?? 14, party + 1))}
+              className="w-10 h-10 rounded-lg flex items-center justify-center bg-white border border-neutral-200 text-lg text-ink"
+            >
+              +
+            </button>
           </div>
+          <p className="text-[11px] text-neutral-400 -mt-3 mb-4">
+            {party >= (active.max_party_size ?? 14)
+              ? `For groups larger than ${active.max_party_size ?? 14}, please contact the restaurant directly.`
+              : "Enter your exact group size — we'll seat you at the right table."}
+          </p>
 
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
             {t("timeTonight")} ({active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"})
@@ -337,7 +368,7 @@ export default function DinerPage() {
           </button>
           <h2 className="font-serif text-xl mb-1 text-ink">{t("whereSit")}</h2>
           <p className="text-sm mb-4 text-neutral-500">
-            {active.name} · {party} guests · {time}
+            {active.name} · {bookingDate} · {party} guests · {time}
           </p>
 
           <div className="flex flex-col gap-3 mb-6">
@@ -437,6 +468,10 @@ export default function DinerPage() {
           </p>
           <div className="w-full rounded-xl p-4 text-sm text-left mb-6 bg-white border border-neutral-200">
             <div className="flex justify-between py-1">
+              <span className="text-neutral-500">{t("date")}</span>
+              <span className="text-ink">{lastBooking.booking_date}</span>
+            </div>
+            <div className="flex justify-between py-1">
               <span className="text-neutral-500">{t("seating")}</span>
               <span className="text-ink">{lastBooking.zone}</span>
             </div>
@@ -487,7 +522,7 @@ export default function DinerPage() {
                   )}
                 </div>
                 <div className="text-xs text-neutral-500 mb-3">
-                  {b.restaurants?.area} · {b.booking_time} · {b.zone} · {b.party_size} guests
+                  {b.restaurants?.area} · {b.booking_date} · {b.booking_time} · {b.zone} · {b.party_size} guests
                 </div>
                 <div className="flex items-center justify-between mb-3">
                   <span
