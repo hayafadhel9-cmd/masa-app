@@ -1,4 +1,4 @@
-# Masa — Project Status & Context
+# Held — Project Status & Context
 
 This file exists so a new Claude Code session can pick up exactly where the previous
 work (done via Claude chat) left off. Read this fully before making changes.
@@ -9,14 +9,21 @@ Two sides: a diner-facing app (browse, book, manage reservations) and a
 restaurant-facing dashboard (accept/decline bookings, manage settings).
 
 Business model: restaurant subscriptions + a cut of no-show fees charged to diners.
-App name is still undecided — currently "Masa" as a placeholder. Shortlist: Masa,
-Majlis, Held.
+The app is named **Held**. All visible branding and user-facing text was renamed from
+the old "Masa" placeholder to Held on 2026-08-25 (see "Brand direction" below for the
+full naming history). **Not renamed, deliberately:** the GitHub repo
+(`hayafadhel9-cmd/masa-app`), the Vercel project/URL, `package.json`'s `name` field, and
+a couple of internal (never user-visible) localStorage keys (`masa_lang`,
+`masa_my_booking_ids`) — these are infrastructure/internal identifiers, not branding, and
+renaming them is a separate, riskier task (breaking the live Vercel deploy URL,
+losing already-saved local "My Bookings" data for existing users, etc.) that hasn't been
+requested yet.
 
 ## Tech stack
 - Next.js (App Router) + Tailwind CSS
 - Supabase (Postgres database + Auth)
-- Deployed on Vercel: https://masa-app-1e96.vercel.app
-- GitHub: hayafadhel9-cmd/masa-app
+- Deployed on Vercel: https://masa-app-1e96.vercel.app (URL unchanged — see note above)
+- GitHub: hayafadhel9-cmd/masa-app (repo name unchanged — see note above)
 
 ## Project structure
 - `app/page.js` — diner-facing app (browse, book, My Bookings tab)
@@ -66,6 +73,12 @@ Majlis, Held.
   capacity-1 zone and a temporary booking, both cleaned up afterward).
 - Full English/Arabic bilingual support with proper RTL layout switching — **customer-facing
   app only**. Dashboard/settings/login are still English-only.
+- Menu management in Settings: restaurant owners can add, edit, and delete their own
+  dishes (name, price, photo) directly from `app/dashboard/settings/page.js` — no more
+  manual SQL. Photos are real uploads (not URL pasting) to a public Supabase Storage
+  bucket (`menu-photos`), scoped per restaurant at `{restaurant_id}/{filename}`. Each
+  dish saves independently (not tied to the main "Save changes" button). The diner-facing
+  menu display (`app/page.js`) shows the photo thumbnail when one is set.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -79,12 +92,17 @@ Majlis, Held.
   looking at the dashboard, or via Supabase realtime updates while the tab is open
 
 ## In-progress work / what to pick up next
-The **zone/table capacity feature** is now complete end-to-end (as of 2026-08-25):
-diner-side availability checking (`loadZoneAvailability()` + "Fully booked at this time"
-UI + a re-check in `confirmBooking()`) was added to `app/page.js`, and `schema.sql` was
-brought back in sync with the live database (it had drifted significantly — see note
-below). Next up is item 2 in the backlog below (visual floor plan builder), unless the
-user redirects.
+The **zone/table capacity feature** and **menu management (with photo upload)** are both
+now complete end-to-end (as of 2026-08-25). Next up is the visual floor plan builder
+(now item 1 in the backlog below), unless the user redirects.
+
+**Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
+that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
+restaurants where ...)` subquery, always qualify the outer object's column explicitly as
+`storage.objects.name` — a bare `name` resolves to the *subquery's* table (`restaurants.name`)
+instead, which silently breaks the policy (it looked plausible but always evaluated
+false). Hit this exact bug while building the menu-photos bucket policies; caught it via
+the browser's alert() surfacing the raw Postgres RLS error, not by reading the SQL.
 
 **Note on `schema.sql`:** it had fallen out of sync with the real Supabase schema —
 missing `owner_id`, `opening_time`, `closing_time`, `party_sizes`, `min_advance_days`,
@@ -98,19 +116,18 @@ trustworthy again, but if something seems off, verify against the live project
 1. Visual floor plan builder for the dashboard (drag/place individual tables, realistic
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
-2. Menu management in Settings (add/edit dishes + photos — currently requires manual SQL)
-3. "Mark as completed" button for confirmed bookings (so they don't sit forever after
+2. "Mark as completed" button for confirmed bookings (so they don't sit forever after
    the reservation time has passed)
-4. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
+3. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
    approval like a brand-new booking request, reusing the existing accept/decline +
    capacity-check flow rather than inventing new logic
-5. Bill-split calculator (split a total by people or items, plus tip)
-6. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
-7. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
+4. Bill-split calculator (split a total by people or items, plus tip)
+5. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
+6. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
    devices instead of relying on localStorage; this should also be the point where
    `bookings` RLS policies get properly tightened
-8. Real Stripe integration for the no-show card hold
-9. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+7. Real Stripe integration for the no-show card hold
+8. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
    for closer to actual app-store launch, since WhatsApp Business API needs its own
    account + approval process
 
@@ -118,7 +135,7 @@ trustworthy again, but if something seems off, verify against the live project
 - Target market: Downtown Dubai & DIFC fine dining specifically, expanding to wider
   Dubai/UAE later — deliberately starting narrow (see reasoning in prior conversation)
 - Main competitor: Eat App (Dubai-based, well-funded, has both B2B software and a
-  consumer app) — Masa's angle is hyper-local curation + a no-show deposit + occasion-aware
+  consumer app) — Held's angle is hyper-local curation + a no-show deposit + occasion-aware
   booking + seating-zone picker, not trying to out-build a funded incumbent
 - Planned subscription pricing: AED 500-800/month benchmark, with a discounted
   "founding partner" rate locked in for the first restaurants
@@ -126,9 +143,44 @@ trustworthy again, but if something seems off, verify against the live project
   campaign specifically around whichever restaurant develops real visible demand/scarcity
   through the app (not before — the hook only works if the reservation was genuinely hard
   to get)
-- Still deciding on final app name (Masa / Majlis / Held)
+- App name decided as Held (was previously undecided between Masa / Majlis / Held) —
+  see "Brand direction" below
 - Full non-code to-do list (design, legal, App Store, business) is tracked separately by
   the user outside this repo
+
+## Design psychology principles — apply to every new feature
+These aren't optional polish, they're a standing design standard for this app:
+- **Cognitive load**: one primary decision per screen. Don't combine multiple choices
+  into one form if they can be sequential steps (see the existing booking flow: party
+  size → time → occasion → zone → card, each its own screen).
+- **Decision fatigue**: keep option sets scoped and relevant, not exhaustive. Only show
+  choices the restaurant actually offers; don't add filters/options "just in case."
+- **Habit loops**: design features to create a cue → routine → reward cycle where
+  possible (e.g., "My Bookings" as a routine check-in; future notifications should
+  nudge gently, not spam).
+- **Color psychology**: the brand is intentionally desaturated/restrained (deep tones +
+  gold accent), not bright primary colors — this is deliberate luxury-market
+  positioning, not a placeholder. See "brand direction" below before changing colors.
+- **Instant gratification**: every action needs immediate visual feedback — loading
+  states, live updates (already using Supabase realtime on the dashboard), confirmation
+  animations. Never leave the user staring at a blank screen wondering if something
+  worked.
+
+## Brand direction (as of latest design discussion)
+- App name: **Held** (finalized). The rename to visible branding/user-facing text was
+  applied throughout the codebase on 2026-08-25 — see the note at the top of this file
+  for exactly what was and wasn't renamed.
+- Wordmark concept: the lowercase "d" in "Held" is redrawn as a reservation-tag
+  silhouette (tapered shape with a punched hole) — a hidden dual-meaning detail, similar
+  to Amazon's arrow. Not yet built into the actual app, currently just a design concept.
+- Color direction is being reconsidered: current app uses light/ivory backgrounds with
+  deep teal (#0B3D3A) + brass gold (#C9A24B). Under discussion: a dark, near-black
+  background (e.g. #151313) with gold accents for a more premium/distinctive feel,
+  since light backgrounds read as generic and gold "glows" more against dark. Leaning
+  toward: keep the working app's everyday screens light for readability, but apply the
+  dark treatment to marketing surfaces (splash screen, app icon, App Store assets,
+  social/marketing content) first, before considering a full app-wide dark theme.
+  Nothing here is finalized — confirm with the user before making a big visual change.
 
 ## Environment / deployment notes
 - The Supabase project (`cqckxtytqyvldqogpscy`) is on the free tier and auto-pauses

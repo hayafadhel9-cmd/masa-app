@@ -2,7 +2,7 @@ import "./globals.css";
 import Providers from "./providers";
 
 export const metadata = {
-  title: "Masa — Downtown & DIFC reservations",
+  title: "Held — Downtown & DIFC reservations",
   description: "Book fine-dining tables in Downtown Dubai & DIFC, held with a no-show guarantee.",
 };
 

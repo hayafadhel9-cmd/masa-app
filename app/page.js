@@ -289,8 +289,11 @@ export default function DinerPage() {
               <p className="text-sm text-neutral-400">{t("noMenuItems")}</p>
             )}
             {menuItems.map((m) => (
-              <div key={m.id} className="flex items-center justify-between text-sm py-2 border-b border-dashed border-neutral-200">
-                <span className="text-ink">{m.name}</span>
+              <div key={m.id} className="flex items-center gap-3 text-sm py-2 border-b border-dashed border-neutral-200">
+                {m.photo_url ? (
+                  <img src={m.photo_url} alt={m.name} className="w-11 h-11 rounded-lg object-cover flex-shrink-0" />
+                ) : null}
+                <span className="text-ink flex-1">{m.name}</span>
                 <span className="text-amber-700">AED {m.price_aed}</span>
               </div>
             ))}

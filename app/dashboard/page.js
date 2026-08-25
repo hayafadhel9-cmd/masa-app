@@ -266,7 +266,7 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <div className="text-[11px] text-neutral-500">
-                        Restaurant keeps AED {total - cut} · Masa fee AED {cut}
+                        Restaurant keeps AED {total - cut} · Held fee AED {cut}
                       </div>
                       <button
                         onClick={() => dismissNoShow(b.id)}

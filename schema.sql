@@ -38,7 +38,8 @@ create table menu_items (
   restaurant_id uuid references restaurants(id) on delete cascade,
   name text not null,
   price_aed integer not null,
-  sort_order integer default 0
+  sort_order integer default 0,
+  photo_url text  -- public URL of the uploaded photo in the menu-photos storage bucket
 );
 
 -- Bookings made by diners
@@ -77,3 +78,86 @@ create policy "Public can view restaurants"
 create policy "Anyone can create a booking"
   on bookings for insert
   with check (true);
+
+-- Restaurant owners manage their own menu items (public read policy for menu_items
+-- already exists: "Public can view menu items")
+create policy "Owners can insert their own menu items"
+  on menu_items for insert
+  with check (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = menu_items.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can update their own menu items"
+  on menu_items for update
+  using (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = menu_items.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = menu_items.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can delete their own menu items"
+  on menu_items for delete
+  using (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = menu_items.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+-- Storage bucket for menu dish photos, uploaded by restaurant owners from Settings.
+-- Public read (so the diner-facing app can display photos); writes restricted to the
+-- owner of the restaurant matching the object's folder ({restaurant_id}/filename).
+insert into storage.buckets (id, name, public)
+values ('menu-photos', 'menu-photos', true)
+on conflict (id) do nothing;
+
+create policy "Public can view menu photos"
+  on storage.objects for select
+  using (bucket_id = 'menu-photos');
+
+create policy "Owners can upload menu photos for their restaurant"
+  on storage.objects for insert
+  with check (
+    bucket_id = 'menu-photos'
+    and exists (
+      select 1 from restaurants
+      where restaurants.id::text = (storage.foldername(storage.objects.name))[1]
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can update menu photos for their restaurant"
+  on storage.objects for update
+  using (
+    bucket_id = 'menu-photos'
+    and exists (
+      select 1 from restaurants
+      where restaurants.id::text = (storage.foldername(storage.objects.name))[1]
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can delete menu photos for their restaurant"
+  on storage.objects for delete
+  using (
+    bucket_id = 'menu-photos'
+    and exists (
+      select 1 from restaurants
+      where restaurants.id::text = (storage.foldername(storage.objects.name))[1]
+      and restaurants.owner_id = auth.uid()
+    )
+  );
