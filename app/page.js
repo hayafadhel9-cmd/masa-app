@@ -58,6 +58,7 @@ export default function DinerPage() {
   const [lastBooking, setLastBooking] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
   const [zoneAvailability, setZoneAvailability] = useState({});
+  const [bookingsView, setBookingsView] = useState("current");
 
   useEffect(() => {
     async function loadRestaurants() {
@@ -210,6 +211,12 @@ export default function DinerPage() {
       r.name.toLowerCase().includes(query.toLowerCase()) ||
       (r.cuisine || "").toLowerCase().includes(query.toLowerCase())
   );
+
+  const currentBookings = myBookings.filter((b) => b.status === "pending" || b.status === "confirmed");
+  const pastBookings = myBookings.filter((b) =>
+    ["dined", "no-show", "cancelled", "declined"].includes(b.status)
+  );
+  const visibleBookings = bookingsView === "current" ? currentBookings : pastBookings;
 
   return (
     <div className="mx-auto max-w-md min-h-screen bg-ivory px-5 pb-24 relative">
@@ -565,12 +572,33 @@ export default function DinerPage() {
           <h2 className="font-serif text-2xl mb-1 text-ink">{t("myBookings")}</h2>
           <p className="text-sm mb-4 text-neutral-500">{t("myBookingsDesc")}</p>
 
-          {myBookings.length === 0 && (
-            <p className="text-sm text-neutral-400 py-8 text-center">{t("myBookingsEmpty")}</p>
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setBookingsView("current")}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                bookingsView === "current" ? "bg-teal text-ivory" : "bg-white text-neutral-500 border border-neutral-200"
+              }`}
+            >
+              {t("currentBookings")}
+            </button>
+            <button
+              onClick={() => setBookingsView("past")}
+              className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                bookingsView === "past" ? "bg-teal text-ivory" : "bg-white text-neutral-500 border border-neutral-200"
+              }`}
+            >
+              {t("pastBookings")}
+            </button>
+          </div>
+
+          {visibleBookings.length === 0 && (
+            <p className="text-sm text-neutral-400 py-8 text-center">
+              {bookingsView === "current" ? t("myBookingsEmpty") : t("pastBookingsEmpty")}
+            </p>
           )}
 
           <div className="flex flex-col gap-3">
-            {myBookings.map((b) => (
+            {visibleBookings.map((b) => (
               <div key={b.id} className="rounded-xl p-4 bg-white border border-neutral-200">
                 <div className="flex items-start justify-between mb-1">
                   <div className="font-serif text-lg text-ink">{b.restaurants?.name}</div>
@@ -588,6 +616,8 @@ export default function DinerPage() {
                     className={`text-xs font-medium ${
                       b.status === "confirmed"
                         ? "text-green-700"
+                        : b.status === "dined"
+                        ? "text-neutral-500"
                         : b.status === "declined" || b.status === "cancelled"
                         ? "text-red-700"
                         : b.status === "no-show"
@@ -599,6 +629,12 @@ export default function DinerPage() {
                       ? t("awaitingConfirmation")
                       : b.status === "cancelled"
                       ? t("cancelled")
+                      : b.status === "declined"
+                      ? t("declined")
+                      : b.status === "no-show"
+                      ? t("noShowStatus")
+                      : b.status === "dined"
+                      ? t("dined")
                       : b.status}
                   </span>
                   <button

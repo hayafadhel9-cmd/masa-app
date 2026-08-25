@@ -79,6 +79,18 @@ requested yet.
   bucket (`menu-photos`), scoped per restaurant at `{restaurant_id}/{filename}`. Each
   dish saves independently (not tied to the main "Save changes" button). The diner-facing
   menu display (`app/page.js`) shows the photo thumbnail when one is set.
+- Restaurant dashboard is organized into three tabs — **Needs Response** (pending),
+  **Confirmed**, and **History** (dined / charged no-shows / cancelled-by-guest) — each
+  showing a live count badge (e.g. "Needs Response (2)") that updates immediately via the
+  existing Supabase realtime subscription regardless of which tab is active. Confirmed
+  bookings have both "Mark as Dined" and "Mark no-show" buttons; marking a booking Dined
+  sets `status = 'dined'` and moves it into History (dined bookings currently have no
+  dismiss action — they stay listed, unlike settled no-shows / archived cancellations).
+- Customer "My Bookings" tab has "Current" (pending/confirmed) and "Past" (dined/no-show/
+  cancelled/declined) pill tabs right below the description text. When a restaurant marks
+  a booking Dined, it automatically appears under the customer's Past tab next time that
+  data loads (no separate realtime subscription on the customer side — this mirrors the
+  existing load-on-tab-switch pattern, not a new live-push mechanism).
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -92,9 +104,12 @@ requested yet.
   looking at the dashboard, or via Supabase realtime updates while the tab is open
 
 ## In-progress work / what to pick up next
-The **zone/table capacity feature** and **menu management (with photo upload)** are both
-now complete end-to-end (as of 2026-08-25). Next up is the visual floor plan builder
-(now item 1 in the backlog below), unless the user redirects.
+The **zone/table capacity feature**, **menu management (with photo upload)**, and
+**dashboard tabs with a "Dined" status + customer Current/Past tabs** are all now
+complete end-to-end (as of 2026-08-25), the last one tested live with a disposable QA
+restaurant account and a real booking taken through accept → confirm → mark Dined, then
+verified on the customer side. Next up is the visual floor plan builder (now item 1 in
+the backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -116,20 +131,22 @@ trustworthy again, but if something seems off, verify against the live project
 1. Visual floor plan builder for the dashboard (drag/place individual tables, realistic
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
-2. "Mark as completed" button for confirmed bookings (so they don't sit forever after
-   the reservation time has passed)
-3. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
+2. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
    approval like a brand-new booking request, reusing the existing accept/decline +
    capacity-check flow rather than inventing new logic
-4. Bill-split calculator (split a total by people or items, plus tip)
-5. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
-6. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
+3. Bill-split calculator (split a total by people or items, plus tip)
+4. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
+5. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
    devices instead of relying on localStorage; this should also be the point where
    `bookings` RLS policies get properly tightened
-7. Real Stripe integration for the no-show card hold
-8. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+6. Real Stripe integration for the no-show card hold
+7. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
    for closer to actual app-store launch, since WhatsApp Business API needs its own
    account + approval process
+
+(The old "Mark as completed" backlog item is done — see "Mark as Dined" above. Note it's
+a manual restaurant action, not an automatic mark-after-time-passes; nobody has asked for
+the automatic version yet.)
 
 ## Business/non-code context (for reference, not to act on automatically)
 - Target market: Downtown Dubai & DIFC fine dining specifically, expanding to wider

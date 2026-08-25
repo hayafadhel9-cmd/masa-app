@@ -11,6 +11,7 @@ export default function DashboardPage() {
   const [restaurants, setRestaurants] = useState([]);
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [activeTab, setActiveTab] = useState("needsResponse");
 
   useEffect(() => {
     async function checkAuth() {
@@ -84,6 +85,11 @@ export default function DashboardPage() {
     loadBookings(selected);
   }
 
+  async function markDined(id) {
+    await supabase.from("bookings").update({ status: "dined" }).eq("id", id);
+    loadBookings(selected);
+  }
+
   async function dismissNoShow(id) {
     await supabase.from("bookings").update({ status: "settled" }).eq("id", id);
     loadBookings(selected);
@@ -97,9 +103,16 @@ export default function DashboardPage() {
   const restaurant = restaurants.find((r) => r.id === selected);
   const pending = bookings.filter((b) => b.status === "pending");
   const confirmed = bookings.filter((b) => b.status === "confirmed");
+  const dined = bookings.filter((b) => b.status === "dined");
   const noShows = bookings.filter((b) => b.status === "no-show");
   const cancelled = bookings.filter((b) => b.status === "cancelled");
   const platformCut = (fee) => Math.round(fee * 0.18);
+
+  const DASHBOARD_TABS = [
+    { key: "needsResponse", label: "Needs Response", count: pending.length },
+    { key: "confirmed", label: "Confirmed", count: confirmed.length },
+    { key: "history", label: "History", count: dined.length + noShows.length + cancelled.length },
+  ];
 
   if (checkingAuth) {
     return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">Loading…</div>;
@@ -148,7 +161,7 @@ export default function DashboardPage() {
 
       {restaurant && (
         <div className="px-6 pt-5 pb-2">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="font-serif text-xl text-ink">{restaurant.name}</h2>
             {restaurant.subscription_status === "trial" ? (
               <span className="text-[10px] font-medium rounded-full px-2.5 py-1 bg-amber-100 text-amber-700">
@@ -160,17 +173,32 @@ export default function DashboardPage() {
               </span>
             )}
           </div>
+          <div className="flex gap-1.5">
+            {DASHBOARD_TABS.map((tabDef) => (
+              <button
+                key={tabDef.key}
+                onClick={() => setActiveTab(tabDef.key)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
+                  activeTab === tabDef.key ? "bg-teal text-ivory" : "bg-neutral-100 text-neutral-600"
+                }`}
+              >
+                {tabDef.label}
+                <span
+                  className={`text-[10px] rounded-full px-1.5 min-w-[16px] text-center ${
+                    activeTab === tabDef.key ? "bg-white/20" : "bg-white"
+                  }`}
+                >
+                  {tabDef.count}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       <div className="px-6 pb-10">
-        <div className="flex items-center gap-2 mt-4 mb-2">
-          <span className="text-[10px] uppercase tracking-widest font-medium text-amber-700">
-            Needs response
-          </span>
-          <span className="text-[10px] rounded-full px-1.5 bg-amber-100 text-amber-700">{pending.length}</span>
-        </div>
-
+        {activeTab === "needsResponse" && (
+        <>
         {pending.length === 0 && (
           <p className="text-xs py-3 text-neutral-400">No new requests right now.</p>
         )}
@@ -208,12 +236,15 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+        </>
+        )}
 
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-[10px] uppercase tracking-widest font-medium text-teal">Confirmed</span>
-          <span className="text-[10px] rounded-full px-1.5 bg-green-100 text-green-700">{confirmed.length}</span>
-        </div>
-        <div className="flex flex-col gap-2 mb-5">
+        {activeTab === "confirmed" && (
+        <>
+        {confirmed.length === 0 && (
+          <p className="text-xs py-3 text-neutral-400">No confirmed bookings yet.</p>
+        )}
+        <div className="flex flex-col gap-2">
           {confirmed.map((b) => (
             <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-green-50 border border-green-100">
               <div>
@@ -229,15 +260,57 @@ export default function DashboardPage() {
                   <CalendarDays size={11} /> {b.booking_date} · {b.booking_time} · {b.zone} · card •••• {b.card_last4}
                 </div>
               </div>
-              <button
-                onClick={() => markNoShow(b.id)}
-                className="text-[10px] rounded-full px-2 py-1 bg-amber-100 text-amber-700"
-              >
-                Mark no-show
-              </button>
+              <div className="flex gap-1.5 flex-shrink-0">
+                <button
+                  onClick={() => markDined(b.id)}
+                  className="text-[10px] rounded-full px-2 py-1 bg-teal text-ivory"
+                >
+                  Mark as Dined
+                </button>
+                <button
+                  onClick={() => markNoShow(b.id)}
+                  className="text-[10px] rounded-full px-2 py-1 bg-amber-100 text-amber-700"
+                >
+                  Mark no-show
+                </button>
+              </div>
             </div>
           ))}
         </div>
+        </>
+        )}
+
+        {activeTab === "history" && (
+        <>
+        {dined.length === 0 && noShows.length === 0 && cancelled.length === 0 && (
+          <p className="text-xs py-3 text-neutral-400">No booking history yet.</p>
+        )}
+
+        {dined.length > 0 && (
+          <>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-[10px] uppercase tracking-widest font-medium text-teal">Dined</span>
+              <span className="text-[10px] rounded-full px-1.5 bg-teal/10 text-teal">{dined.length}</span>
+            </div>
+            <div className="flex flex-col gap-2 mb-5">
+              {dined.map((b) => (
+                <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200">
+                  <div className="text-sm font-medium text-neutral-600 flex items-center gap-2">
+                    {b.guest_name} · {b.party_size} guests
+                    {b.occasion && (
+                      <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
+                        {b.occasion}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs mt-0.5 text-neutral-400">
+                    {b.booking_date} · {b.booking_time} · {b.zone}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
         {noShows.length > 0 && (
           <>
@@ -310,6 +383,8 @@ export default function DashboardPage() {
               ))}
             </div>
           </>
+        )}
+        </>
         )}
       </div>
     </div>
