@@ -133,9 +133,16 @@ requested yet.
   `useLanguage` import at all) are now fully translated in both languages too (new
   `partySizeHint`, `partySizeMaxNote`, `confirmedStatus`, `heldStatus` keys — the last one
   because My Bookings' confirmed-status pill was also hardcoded "Held" in English only).
-  Confirmed there was never any "No calling ahead, no walk-in gamble, just held, for you."
-  copy on the Booking screen in the real app (that line only exists in the original
-  mockup file) — nothing needed removing there.
+  At the time, confirmed there was no "No calling ahead, no walk-in gamble, just held, for
+  you." copy on the Booking screen (that line only existed in the original mockup file) —
+  see the next bullet for where a version of it actually landed shortly after.
+- **Discover screen copy simplified (2026-08-25, same day, follow-up):** removed the
+  "Downtown & DIFC's finest, held for you tonight." heading entirely — the big 52px "Held"
+  wordmark now carries that on its own — and replaced the short subheadline with a fuller
+  slogan: "No calling ahead, no walk in gamble, just held, for you." (deliberately no
+  hyphen in "walk in" per the user's wording). The old `headline1`/`headline2` translation
+  keys were removed from `lib/LanguageContext.js` since nothing else used them; `subheadline`
+  now holds the new line in both English and Arabic.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor

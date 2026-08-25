@@ -281,11 +281,6 @@ export default function DinerPage() {
               </button>
             </div>
           </div>
-          <h1 className="font-serif text-2xl text-charcoal mt-3">
-            {t("headline1")}
-            <br />
-            <span className="italic text-burgundy">{t("headline2")}</span>
-          </h1>
           <div className="w-8 h-0.5 bg-brass my-3.5" />
           <p className="text-sm mb-5 text-muted">{t("subheadline")}</p>
 
