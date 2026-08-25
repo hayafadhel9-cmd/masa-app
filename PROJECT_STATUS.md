@@ -61,7 +61,9 @@ Majlis, Held.
   eliminate) race conditions between two people booking the last table at once.
   **Note:** `zone_capacity` of 0 or unset is treated as "not tracking capacity for this
   zone" (unlimited), not "always full" — this was a deliberate choice to avoid breaking
-  existing restaurants who haven't configured it yet.
+  existing restaurants who haven't configured it yet. Verified end-to-end against the
+  live Supabase project on 2026-08-25 (dev server + browser test with a temporary
+  capacity-1 zone and a temporary booking, both cleaned up afterward).
 - Full English/Arabic bilingual support with proper RTL layout switching — **customer-facing
   app only**. Dashboard/settings/login are still English-only.
 
@@ -77,33 +79,40 @@ Majlis, Held.
   looking at the dashboard, or via Supabase realtime updates while the tab is open
 
 ## In-progress work / what to pick up next
-The most recent active work was finishing the **zone/table capacity feature** described
-above. If continuing that work, verify:
-1. Migration ran: `alter table restaurants add column if not exists zone_capacity jsonb default '{}'::jsonb;`
-2. `app/dashboard/settings/page.js` has per-zone table-count inputs next to each zone checkbox
-3. `app/page.js` has `loadZoneAvailability()`, and the zone-selection screen shows
-   "Fully booked at this time" for zones at capacity
+The **zone/table capacity feature** is now complete end-to-end (as of 2026-08-25):
+diner-side availability checking (`loadZoneAvailability()` + "Fully booked at this time"
+UI + a re-check in `confirmBooking()`) was added to `app/page.js`, and `schema.sql` was
+brought back in sync with the live database (it had drifted significantly — see note
+below). Next up is item 2 in the backlog below (visual floor plan builder), unless the
+user redirects.
+
+**Note on `schema.sql`:** it had fallen out of sync with the real Supabase schema —
+missing `owner_id`, `opening_time`, `closing_time`, `party_sizes`, `min_advance_days`,
+`max_advance_days`, `max_party_size`, `cancellation_notice_hours`, and `zone_capacity`
+on `restaurants`, plus the `zone`/`occasion` columns on `bookings`. All of these existed
+live but were undocumented in the file. This has been fixed — treat `schema.sql` as
+trustworthy again, but if something seems off, verify against the live project
+(`cqckxtytqyvldqogpscy`) rather than assuming the file is current.
 
 ## Full backlog (not yet built), in the order discussed with the user
-1. Table/zone capacity — see above, may already be complete or in progress
-2. Visual floor plan builder for the dashboard (drag/place individual tables, realistic
+1. Visual floor plan builder for the dashboard (drag/place individual tables, realistic
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
-3. Menu management in Settings (add/edit dishes + photos — currently requires manual SQL)
-4. "Mark as completed" button for confirmed bookings (so they don't sit forever after
+2. Menu management in Settings (add/edit dishes + photos — currently requires manual SQL)
+3. "Mark as completed" button for confirmed bookings (so they don't sit forever after
    the reservation time has passed)
-5. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
+4. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
    approval like a brand-new booking request, reusing the existing accept/decline +
    capacity-check flow rather than inventing new logic
-6. Bill-split calculator (split a total by people or items, plus tip)
-7. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
-8. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
+5. Bill-split calculator (split a total by people or items, plus tip)
+6. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
+7. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
    devices instead of relying on localStorage; this should also be the point where
    `bookings` RLS policies get properly tightened
-9. Real Stripe integration for the no-show card hold
-10. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
-    for closer to actual app-store launch, since WhatsApp Business API needs its own
-    account + approval process
+8. Real Stripe integration for the no-show card hold
+9. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+   for closer to actual app-store launch, since WhatsApp Business API needs its own
+   account + approval process
 
 ## Business/non-code context (for reference, not to act on automatically)
 - Target market: Downtown Dubai & DIFC fine dining specifically, expanding to wider
@@ -122,6 +131,10 @@ above. If continuing that work, verify:
   the user outside this repo
 
 ## Environment / deployment notes
+- The Supabase project (`cqckxtytqyvldqogpscy`) is on the free tier and auto-pauses
+  after inactivity — it may show as inactive/paused at the start of a session and need
+  restoring (via the Supabase MCP tool or the dashboard) before queries or the app will
+  work.
 - `.env.local` needs `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
   (not committed to git — see `.env.local.example`)
 - `.npmrc` has `legacy-peer-deps=true` (needed because `lucide-react` was built for an

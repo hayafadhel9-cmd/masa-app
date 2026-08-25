@@ -57,6 +57,7 @@ export default function DinerPage() {
   const [cardNumber, setCardNumber] = useState("");
   const [lastBooking, setLastBooking] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
+  const [zoneAvailability, setZoneAvailability] = useState({});
 
   useEffect(() => {
     async function loadRestaurants() {
@@ -88,7 +89,55 @@ export default function DinerPage() {
     setScreen("restaurant");
   }
 
+  async function loadZoneAvailability() {
+    if (!active) return;
+    const zones = active.zones && active.zones.length > 0 ? active.zones : ["Indoor"];
+    const capacity = active.zone_capacity || {};
+    const { data } = await supabase
+      .from("bookings")
+      .select("zone")
+      .eq("restaurant_id", active.id)
+      .eq("booking_date", bookingDate)
+      .eq("booking_time", time)
+      .in("status", ["pending", "confirmed"]);
+    const counts = {};
+    (data || []).forEach((b) => {
+      counts[b.zone] = (counts[b.zone] || 0) + 1;
+    });
+    const availability = {};
+    zones.forEach((z) => {
+      const cap = Number(capacity[z]) || 0;
+      availability[z] = cap > 0 && (counts[z] || 0) >= cap;
+    });
+    setZoneAvailability(availability);
+  }
+
+  useEffect(() => {
+    if (screen === "zone" && active) {
+      loadZoneAvailability();
+    }
+  }, [screen, active, bookingDate, time]);
+
   async function confirmBooking() {
+    const capacity = active.zone_capacity || {};
+    const cap = Number(capacity[zone]) || 0;
+    if (cap > 0) {
+      const { count } = await supabase
+        .from("bookings")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", active.id)
+        .eq("booking_date", bookingDate)
+        .eq("booking_time", time)
+        .eq("zone", zone)
+        .in("status", ["pending", "confirmed"]);
+      if ((count || 0) >= cap) {
+        const zoneLabel = ZONE_KEYS[zone]?.label ? t(ZONE_KEYS[zone].label) : zone;
+        alert(t("zoneJustFilled", { zone: zoneLabel }));
+        setScreen("zone");
+        loadZoneAvailability();
+        return;
+      }
+    }
     const { data, error } = await supabase
       .from("bookings")
       .insert({
@@ -375,28 +424,34 @@ export default function DinerPage() {
             {(active.zones && active.zones.length > 0 ? active.zones : ["Indoor"]).map((z) => {
               const Icon = ZONE_ICONS[z] || Home;
               const selected = zone === z;
+              const full = !!zoneAvailability[z];
               const zk = ZONE_KEYS[z] || { label: null, desc: null };
               return (
                 <button
                   key={z}
+                  disabled={full}
                   onClick={() => setZone(z)}
                   className={`flex items-center gap-3 rounded-xl p-4 text-left border ${
-                    selected ? "bg-teal border-teal" : "bg-white border-neutral-200"
+                    full
+                      ? "bg-neutral-50 border-neutral-200 opacity-50 cursor-not-allowed"
+                      : selected
+                      ? "bg-teal border-teal"
+                      : "bg-white border-neutral-200"
                   }`}
                 >
                   <div
                     className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      selected ? "bg-white/15" : "bg-neutral-100"
+                      selected && !full ? "bg-white/15" : "bg-neutral-100"
                     }`}
                   >
-                    <Icon size={18} className={selected ? "text-brass" : "text-neutral-500"} />
+                    <Icon size={18} className={selected && !full ? "text-brass" : "text-neutral-500"} />
                   </div>
                   <div>
-                    <div className={`text-sm font-medium ${selected ? "text-ivory" : "text-ink"}`}>
+                    <div className={`text-sm font-medium ${selected && !full ? "text-ivory" : "text-ink"}`}>
                       {zk.label ? t(zk.label) : z}
                     </div>
-                    <div className={`text-xs ${selected ? "text-ivory/70" : "text-neutral-500"}`}>
-                      {zk.desc ? t(zk.desc) : ""}
+                    <div className={`text-xs ${selected && !full ? "text-ivory/70" : "text-neutral-500"}`}>
+                      {full ? t("fullyBooked") : zk.desc ? t(zk.desc) : ""}
                     </div>
                   </div>
                 </button>
@@ -406,7 +461,8 @@ export default function DinerPage() {
 
           <button
             onClick={() => setScreen("hold")}
-            className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory"
+            disabled={zoneAvailability[zone]}
+            className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory disabled:opacity-50"
           >
             {t("continueSecure")}
           </button>

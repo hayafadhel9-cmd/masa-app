@@ -13,6 +13,15 @@ create table restaurants (
   subscription_status text default 'trial',  -- 'trial' | 'active' | 'cancelled'
   trial_ends_at timestamp with time zone,
   zones text[] default array['Indoor'],  -- e.g. {Indoor,Outdoor,"Shisha Terrace"}
+  cancellation_notice_hours integer default 2,
+  owner_id uuid references auth.users(id),  -- links a restaurant to its dashboard login
+  opening_time text default '18:00',
+  closing_time text default '21:30',        -- may be earlier than opening_time (overnight hours)
+  party_sizes integer[] default array[2, 4, 6, 8],
+  min_advance_days integer default 0,
+  max_advance_days integer default 30,
+  max_party_size integer default 14,
+  zone_capacity jsonb default '{}'::jsonb,  -- e.g. {"Indoor": 5, "Outdoor": 3} — table count per zone
   created_at timestamp with time zone default now()
 );
 
@@ -43,7 +52,7 @@ create table bookings (
   occasion text,                  -- e.g. "Birthday" | "Anniversary" | "Business" | null
   booking_time text not null,     -- e.g. "7:30 PM" (swap to a real timestamp for production)
   booking_date date not null default current_date,
-  status text default 'pending',  -- 'pending' | 'confirmed' | 'declined' | 'no-show' | 'completed'
+  status text default 'pending',  -- 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'no-show' | 'completed'
   card_last4 text,                -- from Stripe, never store full card numbers
   stripe_payment_method_id text,  -- Stripe token reference, added when you wire up Stripe
   charged boolean default false,
