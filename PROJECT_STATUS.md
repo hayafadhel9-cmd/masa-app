@@ -143,6 +143,26 @@ requested yet.
   hyphen in "walk in" per the user's wording). The old `headline1`/`headline2` translation
   keys were removed from `lib/LanguageContext.js` since nothing else used them; `subheadline`
   now holds the new line in both English and Arabic.
+- **Discover card icon removed + Restaurant Detail gaps filled (2026-08-25, same day,
+  second follow-up):** the fork/knife placeholder icon next to each restaurant on the
+  Discover list is removed entirely (there's no real restaurant-photo system yet, so it
+  was pure placeholder) — the card layout was simplified to a single-column block so the
+  name/details naturally fill the space instead of leaving a gap. On Restaurant Detail,
+  added the cuisine/price row that had gone missing during the redesign (only area was
+  showing before) and added a real "Available tonight" preview — the same
+  `loadTimeAvailability()` real seat-count logic already used on the Book screen, now also
+  triggered on the `"restaurant"` screen and rendered as a read-only chip row (selection
+  still happens on Book; this is just an at-a-glance preview, matching the mockup's intent
+  without duplicating the actual interactive time-picker). New `availableTonight`
+  translation key. **The menu display was checked and confirmed to have never been broken
+  or dropped** — `openRestaurant()` already queries `menu_items` and the render block was
+  already present; verified live against two different real restaurants with real dishes
+  (including one with real uploaded photos) and both rendered correctly. No fix was needed
+  there, just confirmation.
+  **Not built:** a "short description" field — `restaurants` has no such column in the
+  schema (the mockup's description text was fake placeholder copy, not real data), so nothing
+  was added rather than fabricate content; a real `description` column + Settings field
+  would need to be requested as its own task if wanted.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor

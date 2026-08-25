@@ -129,7 +129,7 @@ export default function DinerPage() {
   }
 
   useEffect(() => {
-    if (screen === "book" && active) {
+    if ((screen === "restaurant" || screen === "book") && active) {
       loadTimeAvailability();
     }
   }, [screen, active, bookingDate]);
@@ -305,24 +305,17 @@ export default function DinerPage() {
               <button
                 key={r.id}
                 onClick={() => openRestaurant(r)}
-                className="flex gap-3.5 text-left rounded-[20px] p-3.5 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]"
+                className="w-full text-left rounded-[20px] p-3.5 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]"
               >
-                <div className="w-16 h-16 min-w-16 rounded-2xl bg-tan flex items-center justify-center text-burgundy opacity-70">
-                  <UtensilsCrossed size={24} />
+                <div className="font-serif text-base text-charcoal">{r.name}</div>
+                <div className="text-xs mt-1 text-muted">
+                  {r.cuisine} · {r.area} · {r.price_tier}
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="font-serif text-base text-charcoal">{r.name}</div>
-                  </div>
-                  <div className="text-xs mt-1 text-muted">
-                    {r.cuisine} · {r.area} · {r.price_tier}
-                  </div>
-                  {r.subscription_status === "trial" && (
-                    <span className="inline-block text-[10px] font-semibold rounded-full px-2.5 py-1 mt-2 border border-brass text-brass">
-                      {t("trialPartner")}
-                    </span>
-                  )}
-                </div>
+                {r.subscription_status === "trial" && (
+                  <span className="inline-block text-[10px] font-semibold rounded-full px-2.5 py-1 mt-2 border border-brass text-brass">
+                    {t("trialPartner")}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -340,12 +333,39 @@ export default function DinerPage() {
           </div>
 
           <h2 className="font-serif text-2xl text-charcoal">{active.name}</h2>
-          <div className="text-xs mt-2 mb-1 flex items-center gap-2 text-muted">
+          <div className="text-xs mt-2 text-muted">
+            {active.cuisine} · {active.price_tier}
+          </div>
+          <div className="text-xs mt-1.5 mb-1 flex items-center gap-2 text-muted">
             <MapPin size={12} /> {active.area}
           </div>
           <div className="text-xs mb-5 flex items-center gap-2 text-muted">
             <Clock size={12} /> {active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"}
           </div>
+
+          {trackingTimeAvailability && (
+            <>
+              <div className="text-[11px] font-bold uppercase tracking-widest mb-3 text-taupe">
+                {t("availableTonight")}
+              </div>
+              <div className="flex flex-wrap gap-2 mb-6">
+                {generateTimeSlots(active.opening_time, active.closing_time).map((tm) => {
+                  const remaining = timeAvailability[tm];
+                  const full = remaining === 0;
+                  return (
+                    <div
+                      key={tm}
+                      className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                        full ? "bg-tan/50 text-taupe" : "bg-tan text-charcoal"
+                      }`}
+                    >
+                      {tm} · {full ? t("slotFull") : t("tablesLeft", { count: remaining })}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
 
           <div className="text-[11px] font-bold uppercase tracking-widest mb-3 text-taupe">
             {t("menuHighlights")}
