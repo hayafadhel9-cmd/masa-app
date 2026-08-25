@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock, UtensilsCrossed } from "lucide-react";
+import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock } from "lucide-react";
 import { addMyBookingId, getMyBookingIds, removeMyBookingId } from "../lib/myBookings";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots } from "../lib/timeSlots";
@@ -328,11 +328,7 @@ export default function DinerPage() {
             <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
 
-          <div className="w-full h-40 rounded-[20px] bg-tan flex items-center justify-center text-burgundy opacity-60 mb-5">
-            <UtensilsCrossed size={40} />
-          </div>
-
-          <h2 className="font-serif text-2xl text-charcoal">{active.name}</h2>
+          <h2 className="font-serif text-2xl text-charcoal mt-2">{active.name}</h2>
           <div className="text-xs mt-2 text-muted">
             {active.cuisine} · {active.price_tier}
           </div>

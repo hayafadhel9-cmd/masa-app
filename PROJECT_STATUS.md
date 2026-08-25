@@ -163,6 +163,12 @@ requested yet.
   schema (the mockup's description text was fake placeholder copy, not real data), so nothing
   was added rather than fabricate content; a real `description` column + Settings field
   would need to be requested as its own task if wanted.
+- **Restaurant Detail hero placeholder removed (2026-08-25, same day, third follow-up):**
+  the large tan hero band with a centered fork/knife icon at the top of Restaurant Detail
+  is removed entirely, same reasoning as the Discover card icons — no real restaurant-photo
+  system exists yet, so it was pure placeholder. "Back," the name, and everything below now
+  sit directly at the top of the screen with no empty gap. The now-unused `UtensilsCrossed`
+  icon import was also removed from `app/page.js` since nothing references it anymore.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
