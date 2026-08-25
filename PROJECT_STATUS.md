@@ -91,6 +91,51 @@ requested yet.
   a booking Dined, it automatically appears under the customer's Past tab next time that
   data loads (no separate realtime subscription on the customer side — this mirrors the
   existing load-on-tab-switch pattern, not a new live-push mechanism).
+- **Customer-facing app visual redesign (2026-08-25):** `app/page.js` and
+  `app/booking/[id]/page.js` were reskinned to a burgundy/gold/cream palette based on a
+  Claude Design canvas mockup the user provided (`held-customer-flow.html`, 6 screens:
+  Discover, RestaurantDetail, Booking, Confirmation, Reservations, ReservationDetail).
+  New Tailwind tokens added in `tailwind.config.js` — `cream`, `card`, `tan`, `burgundy`,
+  `burgundyLight`, `charcoal`, `muted`, `taupe`, `offwhite`, `warn` (gold reuses the
+  existing `brass` token, since the mockup's gold #C9A24B is the exact same value).
+  **The restaurant dashboard/settings/login remain on the old teal/ivory/brass palette,
+  deliberately** — this redesign was explicitly scoped to the customer-facing app only;
+  the two sides now intentionally look different from each other.
+  All existing real functionality was preserved and just reskinned, not replaced: the
+  native min/max-advance-window date input, the real party-size stepper, the occasion
+  picker, the real per-zone capacity/availability check, and the confirm()-dialog booking
+  cancellation flow. One genuinely new feature was added along the way (see next bullet).
+  Deliberately **not** copied from the mockup: the "Tonight/Tomorrow/Party of N" quick-filter
+  chips on its Discover screen (no real filtering logic backs them, and building that
+  wasn't requested) and its single-screen booking form (the real app's multi-step
+  screen flow — restaurant → book → zone → hold → confirmed — was kept as-is, just
+  reskinned per-screen, rather than collapsed into the mockup's simpler one-screen version).
+- **Real per-time-slot availability on the booking screen:** each time chip now shows
+  either "N left" or "Full" (and disables if full), computed from real `zone_capacity` +
+  live booking counts across *all* of a restaurant's zones for that date — added in
+  `loadTimeAvailability()` in `app/page.js`. This only activates when **every** zone has a
+  configured capacity; if even one zone is untracked (unlimited), the feature shows
+  nothing rather than risk an inaccurate partial count — consistent with the existing
+  zone-capacity "0/unset = unlimited" convention. This is upfront, informational only; the
+  authoritative checks remain the existing per-zone check on the seating screen and the
+  second check in `confirmBooking()`.
+- **Copy refinements to the redesign (2026-08-25):** the "Held" wordmark on the Discover
+  screen is now a large 52px/font-extrabold Georgia heading (was a small compact wordmark
+  next to the language toggle). The Restaurant Detail CTA now reads "Continue" (was
+  "Reserve a table"); the Booking screen's CTA now reads "Hold my table" (was "Continue to
+  choose seating") — both are translation values (`reserveTable` / `continueSeating` keys
+  in `lib/LanguageContext.js`), not hardcoded strings, so Arabic has matching copy too.
+  Cancel wording is now status-aware everywhere it appears (My Bookings button label *and*
+  the native `confirm()` dialog it triggers): "Cancel reservation" for a confirmed booking,
+  "Cancel request" for a still-pending one (new `cancelRequest` / `confirmCancelReservation`
+  / `confirmCancelRequest` keys). The party-size helper text and the shared booking page's
+  status label (`app/booking/[id]/page.js`, previously hardcoded English-only with no
+  `useLanguage` import at all) are now fully translated in both languages too (new
+  `partySizeHint`, `partySizeMaxNote`, `confirmedStatus`, `heldStatus` keys — the last one
+  because My Bookings' confirmed-status pill was also hardcoded "Held" in English only).
+  Confirmed there was never any "No calling ahead, no walk-in gamble, just held, for you."
+  copy on the Booking screen in the real app (that line only exists in the original
+  mockup file) — nothing needed removing there.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -104,12 +149,18 @@ requested yet.
   looking at the dashboard, or via Supabase realtime updates while the tab is open
 
 ## In-progress work / what to pick up next
-The **zone/table capacity feature**, **menu management (with photo upload)**, and
-**dashboard tabs with a "Dined" status + customer Current/Past tabs** are all now
-complete end-to-end (as of 2026-08-25), the last one tested live with a disposable QA
-restaurant account and a real booking taken through accept → confirm → mark Dined, then
-verified on the customer side. Next up is the visual floor plan builder (now item 1 in
-the backlog below), unless the user redirects.
+The **zone/table capacity feature**, **menu management (with photo upload)**,
+**dashboard tabs with a "Dined" status + customer Current/Past tabs**, the
+**customer-app burgundy/gold visual redesign (+ real per-time-slot availability)**, and a
+follow-up **copy-polish pass** (wordmark size, CTA wording, status-aware cancel wording,
+localizing the last two hardcoded-English spots) are all now complete end-to-end (as of
+2026-08-25). The redesign and copy pass were each tested live with a disposable QA
+restaurant account through the full flow (Discover → Restaurant → Book → Zone → Hold →
+Confirmed → My Bookings, both Current and Past), in both English and Arabic/RTL,
+including driving a real time slot to "Full" via a second real booking and confirming the
+UI reflected it, and confirming the cancel wording switches correctly between a pending
+and a confirmed booking. Next up is the visual floor plan builder (now item 1
+in the backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -190,14 +241,27 @@ These aren't optional polish, they're a standing design standard for this app:
 - Wordmark concept: the lowercase "d" in "Held" is redrawn as a reservation-tag
   silhouette (tapered shape with a punched hole) — a hidden dual-meaning detail, similar
   to Amazon's arrow. Not yet built into the actual app, currently just a design concept.
-- Color direction is being reconsidered: current app uses light/ivory backgrounds with
-  deep teal (#0B3D3A) + brass gold (#C9A24B). Under discussion: a dark, near-black
-  background (e.g. #151313) with gold accents for a more premium/distinctive feel,
-  since light backgrounds read as generic and gold "glows" more against dark. Leaning
-  toward: keep the working app's everyday screens light for readability, but apply the
-  dark treatment to marketing surfaces (splash screen, app icon, App Store assets,
-  social/marketing content) first, before considering a full app-wide dark theme.
-  Nothing here is finalized — confirm with the user before making a big visual change.
+- **Color direction — decided and implemented for the customer app (2026-08-25):**
+  the earlier dark-near-black-background idea discussed below was superseded when the
+  user provided a finished design mockup instead. The customer-facing app
+  (`app/page.js`, `app/booking/[id]/page.js`) now uses a warm cream/burgundy/gold
+  palette: cream background (#F3EAE0), card surface (#FBF6EF), burgundy primary
+  (#4A1729), gold accent (#C9A24B, same value as the existing `brass` token), charcoal
+  text (#2B1F21) — see "What's fully working right now" above for the full token list
+  and scope. The restaurant dashboard/settings/login intentionally still use the older
+  teal/ivory/brass palette; nobody has asked to redesign that side yet.
+  Superseded discussion, kept for history: a dark near-black background (e.g. #151313)
+  with gold accents was being considered as an alternative, reasoning that light
+  backgrounds read as generic and gold "glows" more against dark, with a lean toward
+  applying that dark treatment only to marketing surfaces (splash screen, app icon, App
+  Store assets) rather than the working app. That idea was never built and is no longer
+  the active direction now that the cream/burgundy mockup has been implemented instead —
+  raise it again explicitly if the user wants to revisit a dark theme.
+- The original mockup the redesign was based on lives at `~/Downloads/held-customer-flow.html`
+  (a Claude Design canvas export — the actual per-screen HTML/CSS is JSON-embedded inside
+  it under a `<script type="application/json" id="appifact-doc">` tag, not directly
+  readable as plain HTML; extract it with a small script if you need to reference it
+  again, e.g. for redesigning the dashboard side later).
 
 ## Environment / deployment notes
 - The Supabase project (`cqckxtytqyvldqogpscy`) is on the free tier and auto-pauses
