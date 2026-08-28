@@ -267,6 +267,20 @@ requested yet.
   `no_show_fee_aed = 0` (all three absent, booking completes with zero card input) — both
   cases verified in English and in Arabic/RTL (the new Arabic string reads "لا حاجة لبطاقة
   — هذا المطعم لا يفرض رسوم عدم حضور.").
+- **Cream background color updated to its final brand shade (2026-08-29):** the `cream`
+  Tailwind token (`tailwind.config.js`) changed from #F3EAE0 to #F1E9D6, the finalized
+  shade from the brand's logo files. This is the only place the color is defined — every
+  usage (`app/page.js`'s main screen container and bottom tab bar, `app/booking/[id]/page.js`'s
+  three screens) reads `bg-cream` and picked up the new value automatically with no other
+  code changes needed. Verified live: `getComputedStyle` on a `.bg-cream` element returns
+  `rgb(241, 233, 214)` (= #F1E9D6 exactly), and the shareable booking page and Discover
+  screen both render the new shade correctly.
+  **Not done — blocked, needs the user's input:** the same request also asked to wire up 8
+  new "Held" wordmark icon files (`held-wordmark-icon-29.png` through `-1024.png`) as the
+  site/app favicon, apple-touch-icon, and manifest icons. Those files do not actually exist
+  in `public/` (checked — the folder is empty) or anywhere else searched (Downloads,
+  Desktop, Documents). The user confirmed doing the color change alone for now and will add
+  the files separately before the icon-wiring half of this request is picked back up.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -289,8 +303,17 @@ localizing the last two hardcoded-English spots), **editing an existing booking*
 for the restaurant dashboard, settings, and login pages** are all now complete end-to-end
 (as of 2026-08-29). Each was tested live with a disposable QA restaurant account — see
 the dated bullets above for what was specifically verified for the two most recent
-features. Nothing is currently in progress. Next up is the visual floor plan builder (now
-item 1 in the backlog below), unless the user redirects.
+features. The **no-show fee disclosure/card field bug fix** and the **cream color update
+to #F1E9D6** (2026-08-29) are also both done — see the dated bullets above. **Pending:**
+wiring up the 8 new "Held" wordmark icon files as the favicon/apple-touch-icon/manifest
+icons — the user asked for this alongside the color change, but the files aren't actually
+in `public/` yet (confirmed empty). Once the user adds `held-wordmark-icon-29.png` through
+`held-wordmark-icon-1024.png` to `public/`, pick this up: reference appropriately-sized
+ones from `app/layout.js`'s `metadata.icons` (favicon, apple-touch-icon) and create/update
+a `manifest.json` (none exists yet) to list the larger sizes for PWA install icons, then
+verify the favicon renders in an actual browser tab before considering it done — a build
+passing isn't sufficient proof for this kind of change. Next up after that is the visual
+floor plan builder (now item 1 in the backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -374,7 +397,8 @@ These aren't optional polish, they're a standing design standard for this app:
   the earlier dark-near-black-background idea discussed below was superseded when the
   user provided a finished design mockup instead. The customer-facing app
   (`app/page.js`, `app/booking/[id]/page.js`) now uses a warm cream/burgundy/gold
-  palette: cream background (#F3EAE0), card surface (#FBF6EF), burgundy primary
+  palette: cream background (#F1E9D6 — updated 2026-08-29 from the initial #F3EAE0 to the
+  brand's final shade), card surface (#FBF6EF), burgundy primary
   (#4A1729), gold accent (#C9A24B, same value as the existing `brass` token), charcoal
   text (#2B1F21) — see "What's fully working right now" above for the full token list
   and scope. The restaurant dashboard/settings/login intentionally still use the older

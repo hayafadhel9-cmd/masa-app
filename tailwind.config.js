@@ -14,7 +14,7 @@ module.exports = {
         teal: "#0B3D3A",
         brass: "#C9A24B",
         // Customer-facing app palette (Held redesign, 2026-08-25).
-        cream: "#F3EAE0",
+        cream: "#F1E9D6",
         card: "#FBF6EF",
         tan: "#E4D6C6",
         burgundy: "#4A1729",
