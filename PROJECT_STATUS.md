@@ -249,6 +249,24 @@ requested yet.
   menu section) renders and saves correctly with the green "تم الحفظ!" confirmation; the
   login/signup form and its language toggle work correctly after signing out. **Not
   built:** nothing scoped out — this covers the full three-page request as asked.
+- **Bug fix — no-show fee disclosure/card field shown even when a restaurant charges
+  AED 0 (2026-08-29):** the booking Hold screen in `app/page.js` used to always show the
+  no-show fee disclosure box and require a card number, even for a restaurant with
+  `no_show_fee_aed` set to 0 (or unset) — misleading, since there was nothing to actually
+  charge. Fixed by conditioning the disclosure box, the card number field, and the Stripe
+  prototype disclaimer paragraph on `active.no_show_fee_aed > 0`; when it's 0/unset, the
+  screen instead shows a shorter subtitle via a new `holdsTableNoCard` translation key
+  ("No card required — this restaurant doesn't charge a no-show fee.") and the customer can
+  tap straight through to "Confirm & hold table" with no card entry at all. When the fee is
+  greater than 0, behavior is byte-for-byte unchanged (disclosure box + required card
+  field). `card_last4` still falls back to the existing "4242" placeholder value in the
+  no-card case (nothing reads it unless a restaurant later marks that booking a no-show,
+  which is a pre-existing, unrelated dashboard behavior not touched by this fix). Tested
+  live against two disposable QA restaurants: one with `no_show_fee_aed = 150` (disclosure
+  box, card field, and disclaimer all present, exactly as before) and one with
+  `no_show_fee_aed = 0` (all three absent, booking completes with zero card input) — both
+  cases verified in English and in Arabic/RTL (the new Arabic string reads "لا حاجة لبطاقة
+  — هذا المطعم لا يفرض رسوم عدم حضور.").
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor

@@ -762,29 +762,35 @@ export default function DinerPage() {
             <h2 className="font-serif text-xl text-charcoal">{t("secureTable")}</h2>
           </div>
           <p className="text-sm mb-5 text-muted">
-            {active.name} {t("holdsTable")}
+            {active.name} {active.no_show_fee_aed > 0 ? t("holdsTable") : t("holdsTableNoCard")}
           </p>
 
-          <div className="rounded-2xl p-4 mb-6 flex items-start gap-3 bg-card border border-brass/40">
-            <AlertTriangle size={16} className="text-brass mt-0.5 flex-shrink-0" />
-            <div className="text-xs text-charcoal">
-              <span className="font-semibold">
-                {t("noShowFeeLabel", { fee: active.no_show_fee_aed })}
-              </span>{" "}
-              <span className="text-muted">{t("freeCancelLabel", { hours: active.cancellation_notice_hours ?? 2 })}</span>
+          {active.no_show_fee_aed > 0 && (
+            <div className="rounded-2xl p-4 mb-6 flex items-start gap-3 bg-card border border-brass/40">
+              <AlertTriangle size={16} className="text-brass mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-charcoal">
+                <span className="font-semibold">
+                  {t("noShowFeeLabel", { fee: active.no_show_fee_aed })}
+                </span>{" "}
+                <span className="text-muted">{t("freeCancelLabel", { hours: active.cancellation_notice_hours ?? 2 })}</span>
+              </div>
             </div>
-          </div>
+          )}
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("cardNumber")}</label>
-          <div className="flex items-center gap-2 rounded-full px-4 py-3.5 mt-2 mb-6 bg-tan">
-            <CreditCard size={16} className="text-muted" />
-            <input
-              value={cardNumber}
-              onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").slice(0, 16))}
-              placeholder="4242 4242 4242 4242"
-              className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
-            />
-          </div>
+          {active.no_show_fee_aed > 0 && (
+            <>
+              <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("cardNumber")}</label>
+              <div className="flex items-center gap-2 rounded-full px-4 py-3.5 mt-2 mb-6 bg-tan">
+                <CreditCard size={16} className="text-muted" />
+                <input
+                  value={cardNumber}
+                  onChange={(e) => setCardNumber(e.target.value.replace(/\D/g, "").slice(0, 16))}
+                  placeholder="4242 4242 4242 4242"
+                  className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
+                />
+              </div>
+            </>
+          )}
 
           <button
             onClick={confirmBooking}
@@ -792,7 +798,9 @@ export default function DinerPage() {
           >
             {t("confirmHold")}
           </button>
-          <p className="text-[11px] text-center text-taupe">{t("cardDisclaimer")}</p>
+          {active.no_show_fee_aed > 0 && (
+            <p className="text-[11px] text-center text-taupe">{t("cardDisclaimer")}</p>
+          )}
         </div>
       )}
 
