@@ -71,8 +71,9 @@ requested yet.
   existing restaurants who haven't configured it yet. Verified end-to-end against the
   live Supabase project on 2026-08-25 (dev server + browser test with a temporary
   capacity-1 zone and a temporary booking, both cleaned up afterward).
-- Full English/Arabic bilingual support with proper RTL layout switching — **customer-facing
-  app only**. Dashboard/settings/login are still English-only.
+- Full English/Arabic bilingual support with proper RTL layout switching across **the
+  entire app** — customer-facing pages and the restaurant dashboard/settings/login (see
+  the 2026-08-29 bullet below for when the dashboard side was added).
 - Menu management in Settings: restaurant owners can add, edit, and delete their own
   dishes (name, price, photo) directly from `app/dashboard/settings/page.js` — no more
   manual SQL. Photos are real uploads (not URL pasting) to a public Supabase Storage
@@ -226,6 +227,28 @@ requested yet.
   occasion field (out of scope — only time/zone/party size were requested, since those are
   the fields that affect capacity) and any dashboard-side UI to distinguish an edit-request
   booking from a fresh one (deliberately, per the request — it's meant to look identical).
+- **Restaurant dashboard, settings, and login pages translated into Arabic (2026-08-29):**
+  `app/dashboard/page.js`, `app/dashboard/settings/page.js`, and `app/dashboard/login/page.js`
+  now use the same shared `useLanguage()` / `LanguageContext.js` mechanism as the customer
+  app, including full RTL layout (the existing `LanguageProvider` and `masa_lang`
+  localStorage persistence are global across the whole app already, so no provider-wiring
+  changes were needed — just per-page `useLanguage()` imports, a language-toggle button
+  added to each page's header, `t()` calls replacing every hardcoded string, and `rtl:`
+  Tailwind variants on directional icons like the settings page's back chevron). Roughly 70
+  new translation keys were added to `lib/LanguageContext.js` for these three pages
+  (verified programmatically that the English and Arabic key sets match exactly, no
+  duplicates). In `app/dashboard/settings/page.js`, the zone names (Indoor/Outdoor/Shisha
+  Terrace) reuse the customer app's existing zone translation keys rather than duplicating
+  them, and the save-confirmation message's color now comes from a dedicated `saveError`
+  boolean state set explicitly in the save handler, not from comparing `savedMsg` against a
+  translated string (comparing against translated text would break if the user switched
+  language between saving and the message re-rendering). Verified live end-to-end in
+  Arabic against a disposable QA restaurant: dashboard header, tab labels, and booking
+  cards render correctly RTL-mirrored; Settings' full form (name, cuisine, area, price
+  tier, booking window, zones + per-zone table counts, no-show fee, cancellation window,
+  menu section) renders and saves correctly with the green "تم الحفظ!" confirmation; the
+  login/signup form and its language toggle work correctly after signing out. **Not
+  built:** nothing scoped out — this covers the full three-page request as asked.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -243,12 +266,13 @@ The **zone/table capacity feature**, **menu management (with photo upload)**,
 **dashboard tabs with a "Dined" status + customer Current/Past tabs**, the
 **customer-app burgundy/gold visual redesign (+ real per-time-slot availability)**, a
 follow-up **copy-polish pass** (wordmark size, CTA wording, status-aware cancel wording,
-localizing the last two hardcoded-English spots), and **editing an existing booking**
-(re-triggers restaurant approval as a fresh pending request) are all now complete
-end-to-end (as of 2026-08-29). Each was tested live with a disposable QA restaurant
-account — see the dated bullets above for what was specifically verified for the most
-recent feature. Nothing is currently in progress. Next up is the visual floor plan builder
-(now item 1 in the backlog below), unless the user redirects.
+localizing the last two hardcoded-English spots), **editing an existing booking**
+(re-triggers restaurant approval as a fresh pending request), and **Arabic/RTL support
+for the restaurant dashboard, settings, and login pages** are all now complete end-to-end
+(as of 2026-08-29). Each was tested live with a disposable QA restaurant account — see
+the dated bullets above for what was specifically verified for the two most recent
+features. Nothing is currently in progress. Next up is the visual floor plan builder (now
+item 1 in the backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -271,17 +295,16 @@ trustworthy again, but if something seems off, verify against the live project
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
 2. Bill-split calculator (split a total by people or items, plus tip)
-3. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
-4. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
+3. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
    devices instead of relying on localStorage; this should also be the point where
    `bookings` RLS policies get properly tightened
-5. Real Stripe integration for the no-show card hold
-6. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+4. Real Stripe integration for the no-show card hold
+5. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
    for closer to actual app-store launch, since WhatsApp Business API needs its own
    account + approval process
 
-(Edit-an-existing-booking, previously item 2 here, is done — see the 2026-08-29 bullet
-above.)
+(Edit-an-existing-booking and dashboard/settings/login Arabic translation, both
+previously items 2 and 4 here, are done — see the 2026-08-29 bullets above.)
 
 (The old "Mark as completed" backlog item is done — see "Mark as Dined" above. Note it's
 a manual restaurant action, not an automatic mark-after-time-passes; nobody has asked for

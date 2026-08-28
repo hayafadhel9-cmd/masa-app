@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
-import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff } from "lucide-react";
+import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide-react";
+import { useLanguage } from "../../../lib/LanguageContext";
 
 const MENU_PHOTOS_BUCKET = "menu-photos";
 
@@ -15,6 +16,11 @@ function extractStoragePath(url) {
 }
 
 const ALL_ZONES = ["Indoor", "Outdoor", "Shisha Terrace"];
+const ZONE_KEYS = {
+  Indoor: "indoor",
+  Outdoor: "outdoor",
+  "Shisha Terrace": "shishaTerrace",
+};
 const PRICE_TIERS = ["$", "$$", "$$$", "$$$$"];
 
 export default function RestaurantSettingsPage() {
@@ -28,11 +34,13 @@ export default function RestaurantSettingsPage() {
 function RestaurantSettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { lang, setLang, t } = useLanguage();
   const isOnboarding = searchParams.get("onboarding") === "true";
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [restaurant, setRestaurant] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [saveError, setSaveError] = useState(false);
 
   const [name, setName] = useState("");
   const [cuisine, setCuisine] = useState("");
@@ -186,6 +194,7 @@ function RestaurantSettingsInner() {
     if (!restaurant) return;
     setSaving(true);
     setSavedMsg("");
+    setSaveError(false);
     const cleanedCapacity = {};
     zones.forEach((z) => {
       cleanedCapacity[z] = Number(zoneCapacity[z]) || 0;
@@ -211,49 +220,56 @@ function RestaurantSettingsInner() {
       .eq("id", restaurant.id);
     setSaving(false);
     if (error) {
+      setSaveError(true);
       setSavedMsg("Something went wrong: " + error.message);
     } else {
       if (isOnboarding) {
         router.push("/dashboard");
         return;
       }
-      setSavedMsg("Saved!");
+      setSavedMsg(t("saved"));
     }
   }
 
   if (checkingAuth) {
-    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">Loading…</div>;
+    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">{t("loading")}</div>;
   }
 
   if (!restaurant) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-ivory px-6 pt-16 text-sm text-neutral-500">
-        No restaurant is linked to your account yet.
+        {t("noRestaurantLinked")}
       </div>
     );
   }
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-ivory px-6 pb-16">
-      <button
-        onClick={() => router.push("/dashboard")}
-        className="flex items-center gap-1 text-sm text-teal py-4"
-      >
-        <ChevronLeft size={16} /> {isOnboarding ? "Skip for now" : "Back to dashboard"}
-      </button>
+      <div className="flex items-center justify-between pt-4">
+        <button
+          onClick={() => router.push("/dashboard")}
+          className="flex items-center gap-1 text-sm text-teal py-2"
+        >
+          <ChevronLeft size={16} className="rtl:rotate-180" /> {isOnboarding ? t("skipForNow") : t("backToDashboard")}
+        </button>
+        <button
+          onClick={() => setLang(lang === "en" ? "ar" : "en")}
+          className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
+        >
+          <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
+        </button>
+      </div>
 
-      <h1 className="font-serif text-2xl text-ink mb-1">
-        {isOnboarding ? "Set up your restaurant" : "Restaurant settings"}
+      <h1 className="font-serif text-2xl text-ink mb-1 mt-2">
+        {isOnboarding ? t("setUpRestaurant") : t("restaurantSettings")}
       </h1>
       <p className="text-sm text-neutral-500 mb-6">
-        {isOnboarding
-          ? "Tell diners what to expect — this is what they'll see before booking."
-          : "Update this anytime — prices, seating, and details go live immediately."}
+        {isOnboarding ? t("onboardingSubtitle") : t("settingsSubtitle")}
       </p>
 
       <form onSubmit={handleSave} className="flex flex-col gap-4">
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Restaurant name</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("restaurantName")}</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -263,27 +279,27 @@ function RestaurantSettingsInner() {
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Cuisine</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("cuisine")}</label>
           <input
             value={cuisine}
             onChange={(e) => setCuisine(e.target.value)}
-            placeholder="e.g. Modern European"
+            placeholder={t("cuisinePlaceholder")}
             className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
           />
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Area</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("area")}</label>
           <input
             value={area}
             onChange={(e) => setArea(e.target.value)}
-            placeholder="e.g. DIFC"
+            placeholder={t("areaPlaceholder")}
             className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
           />
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Price tier</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("priceTier")}</label>
           <div className="flex gap-2 mt-2">
             {PRICE_TIERS.map((p) => (
               <button
@@ -302,11 +318,11 @@ function RestaurantSettingsInner() {
 
         <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            How far ahead can diners book?
+            {t("advanceBookingQuestion")}
           </label>
           <div className="flex gap-2 mt-2 items-center">
             <div className="flex-1">
-              <span className="text-[10px] text-neutral-400">Minimum notice (days)</span>
+              <span className="text-[10px] text-neutral-400">{t("minNoticeDays")}</span>
               <input
                 type="number"
                 min="0"
@@ -316,7 +332,7 @@ function RestaurantSettingsInner() {
               />
             </div>
             <div className="flex-1">
-              <span className="text-[10px] text-neutral-400">Maximum window (days)</span>
+              <span className="text-[10px] text-neutral-400">{t("maxWindowDays")}</span>
               <input
                 type="number"
                 min="0"
@@ -326,13 +342,11 @@ function RestaurantSettingsInner() {
               />
             </div>
           </div>
-          <p className="text-[11px] text-neutral-400 mt-1">
-            0 minimum means same-day bookings are allowed. E.g. 0 to 30 lets diners book anywhere from tonight to a month out.
-          </p>
+          <p className="text-[11px] text-neutral-400 mt-1">{t("advanceBookingHint")}</p>
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Booking hours</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("bookingHours")}</label>
           <div className="flex gap-2 mt-2 items-center">
             <input
               type="time"
@@ -340,7 +354,7 @@ function RestaurantSettingsInner() {
               onChange={(e) => setOpeningTime(e.target.value)}
               className="flex-1 rounded-lg px-3 py-2.5 text-sm outline-none bg-white border border-neutral-200"
             />
-            <span className="text-xs text-neutral-400">to</span>
+            <span className="text-xs text-neutral-400">{t("to")}</span>
             <input
               type="time"
               value={closingTime}
@@ -348,14 +362,12 @@ function RestaurantSettingsInner() {
               className="flex-1 rounded-lg px-3 py-2.5 text-sm outline-none bg-white border border-neutral-200"
             />
           </div>
-          <p className="text-[11px] text-neutral-400 mt-1">
-            This is the window diners can pick a time slot within, in 30-minute steps.
-          </p>
+          <p className="text-[11px] text-neutral-400 mt-1">{t("bookingHoursHint")}</p>
         </div>
 
         <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            Largest group you can seat online
+            {t("maxPartySizeLabel")}
           </label>
           <input
             type="number"
@@ -364,13 +376,11 @@ function RestaurantSettingsInner() {
             onChange={(e) => setMaxPartySize(e.target.value)}
             className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
           />
-          <p className="text-[11px] text-neutral-400 mt-1">
-            Diners can request any group size up to this number. Beyond it, they'll be told to contact you directly.
-          </p>
+          <p className="text-[11px] text-neutral-400 mt-1">{t("maxPartySizeHint")}</p>
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Table sizes you offer</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("tableSizesOffered")}</label>
           <div className="grid grid-cols-4 gap-2 mt-2">
             {[2, 4, 6, 8, 10, 12].map((size) => (
               <button
@@ -388,7 +398,7 @@ function RestaurantSettingsInner() {
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Seating available</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("seatingAvailable")}</label>
           <div className="flex flex-col gap-2 mt-2">
             {ALL_ZONES.map((z) => (
               <div
@@ -401,7 +411,7 @@ function RestaurantSettingsInner() {
                     checked={zones.includes(z)}
                     onChange={() => toggleZone(z)}
                   />
-                  {z}
+                  {t(ZONE_KEYS[z])}
                 </label>
                 {zones.includes(z) && (
                   <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -413,20 +423,18 @@ function RestaurantSettingsInner() {
                       placeholder="0"
                       className="w-16 rounded-md px-2 py-1 text-xs outline-none bg-neutral-50 border border-neutral-200 text-center"
                     />
-                    <span className="text-[10px] text-neutral-400">tables</span>
+                    <span className="text-[10px] text-neutral-400">{t("tablesUnit")}</span>
                   </div>
                 )}
               </div>
             ))}
           </div>
-          <p className="text-[11px] text-neutral-400 mt-1">
-            How many tables you have in each area. Diners will see a zone as fully booked once all its tables are taken for a given time.
-          </p>
+          <p className="text-[11px] text-neutral-400 mt-1">{t("zoneCapacityHint")}</p>
         </div>
 
         <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            No-show fee (AED per guest)
+            {t("noShowFeeSetting")}
           </label>
           <input
             type="number"
@@ -439,7 +447,7 @@ function RestaurantSettingsInner() {
 
         <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            Free cancellation window (hours before booking)
+            {t("cancellationWindowSetting")}
           </label>
           <input
             type="number"
@@ -451,7 +459,7 @@ function RestaurantSettingsInner() {
         </div>
 
         {savedMsg && (
-          <p className={`text-xs ${savedMsg === "Saved!" ? "text-green-700" : "text-red-600"}`}>{savedMsg}</p>
+          <p className={`text-xs ${saveError ? "text-red-600" : "text-green-700"}`}>{savedMsg}</p>
         )}
 
         <button
@@ -459,25 +467,23 @@ function RestaurantSettingsInner() {
           disabled={saving}
           className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory flex items-center justify-center gap-2 disabled:opacity-60"
         >
-          <Save size={15} /> {saving ? "Saving…" : isOnboarding ? "Finish setup" : "Save changes"}
+          <Save size={15} /> {saving ? t("saving") : isOnboarding ? t("finishSetup") : t("saveChanges")}
         </button>
       </form>
 
       <div className="mt-8 pt-6 border-t border-neutral-200">
-        <h2 className="font-serif text-xl text-ink mb-1">Menu</h2>
-        <p className="text-sm text-neutral-500 mb-4">
-          Add the dishes diners see on your listing. Changes here save immediately.
-        </p>
+        <h2 className="font-serif text-xl text-ink mb-1">{t("menu")}</h2>
+        <p className="text-sm text-neutral-500 mb-4">{t("menuSectionHint")}</p>
 
         <div className="flex flex-col gap-2 mb-4">
-          {menuItems.length === 0 && <p className="text-xs text-neutral-400">No dishes added yet.</p>}
+          {menuItems.length === 0 && <p className="text-xs text-neutral-400">{t("noMenuItems")}</p>}
           {menuItems.map((item) => (
-            <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} />
+            <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} t={t} />
           ))}
         </div>
 
         <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
-          <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-2">Add a dish</div>
+          <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-2">{t("addADish")}</div>
           <div className="flex items-center gap-2 mb-2">
             <label className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden border border-neutral-200">
               {newDishPreview ? (
@@ -490,7 +496,7 @@ function RestaurantSettingsInner() {
             <input
               value={newDishName}
               onChange={(e) => setNewDishName(e.target.value)}
-              placeholder="Dish name"
+              placeholder={t("dishNamePlaceholder")}
               className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
             />
             <input
@@ -498,7 +504,7 @@ function RestaurantSettingsInner() {
               min="0"
               value={newDishPrice}
               onChange={(e) => setNewDishPrice(e.target.value)}
-              placeholder="AED"
+              placeholder={t("aedPlaceholder")}
               className="w-20 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
             />
           </div>
@@ -508,7 +514,7 @@ function RestaurantSettingsInner() {
             disabled={addingDish || !newDishName.trim() || !newDishPrice}
             className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
           >
-            <Plus size={13} /> {addingDish ? "Adding…" : "Add dish"}
+            <Plus size={13} /> {addingDish ? t("adding") : t("addDish")}
           </button>
         </div>
       </div>
@@ -516,7 +522,7 @@ function RestaurantSettingsInner() {
   );
 }
 
-function MenuItemRow({ item, onSave, onDelete }) {
+function MenuItemRow({ item, onSave, onDelete, t }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(item.name);
   const [price, setPrice] = useState(item.price_aed);
@@ -566,12 +572,12 @@ function MenuItemRow({ item, onSave, onDelete }) {
           onClick={() => setEditing(true)}
           className="text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink flex-shrink-0"
         >
-          Edit
+          {t("edit")}
         </button>
         <button
           type="button"
           onClick={() => onDelete(item)}
-          aria-label="Delete dish"
+          aria-label={t("deleteDish")}
           className="w-8 h-8 rounded-full flex items-center justify-center bg-red-50 text-red-600 flex-shrink-0"
         >
           <Trash2 size={14} />
@@ -611,10 +617,10 @@ function MenuItemRow({ item, onSave, onDelete }) {
           disabled={saving || !name.trim()}
           className="flex-1 rounded-full py-2 text-xs font-medium bg-teal text-ivory disabled:opacity-60"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("saving") : t("save")}
         </button>
         <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs bg-neutral-100 text-ink">
-          Cancel
+          {t("cancel")}
         </button>
       </div>
     </div>

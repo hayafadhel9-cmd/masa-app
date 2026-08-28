@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabaseClient";
-import { LayoutDashboard, Mail, Lock } from "lucide-react";
+import { LayoutDashboard, Mail, Lock, Globe } from "lucide-react";
+import { useLanguage } from "../../../lib/LanguageContext";
 
 export default function DashboardLoginPage() {
   const router = useRouter();
+  const { lang, setLang, t } = useLanguage();
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -59,22 +61,30 @@ export default function DashboardLoginPage() {
 
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16">
-      <div className="flex items-center gap-2 mb-1">
-        <LayoutDashboard size={20} className="text-teal" />
-        <h1 className="font-serif text-2xl text-ink">Partner login</h1>
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center gap-2">
+          <LayoutDashboard size={20} className="text-teal" />
+          <h1 className="font-serif text-2xl text-ink">{t("partnerLogin")}</h1>
+        </div>
+        <button
+          onClick={() => setLang(lang === "en" ? "ar" : "en")}
+          className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
+        >
+          <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
+        </button>
       </div>
       <p className="text-sm text-neutral-500 mb-6">
-        {mode === "login" ? "Sign in to manage your restaurant." : "Create your restaurant account."}
+        {mode === "login" ? t("signInSubtitle") : t("signUpSubtitle")}
       </p>
 
       <form onSubmit={mode === "login" ? handleLogin : handleSignup} className="flex flex-col gap-4">
         {mode === "signup" && (
           <div>
-            <label className="text-[10px] uppercase tracking-widest text-neutral-400">Restaurant name</label>
+            <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("restaurantName")}</label>
             <input
               value={restaurantName}
               onChange={(e) => setRestaurantName(e.target.value)}
-              placeholder="e.g. Ember & Vine"
+              placeholder={t("restaurantNamePlaceholder")}
               className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
               required
             />
@@ -82,7 +92,7 @@ export default function DashboardLoginPage() {
         )}
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Email</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("email")}</label>
           <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
             <Mail size={15} className="text-neutral-400" />
             <input
@@ -97,7 +107,7 @@ export default function DashboardLoginPage() {
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">Password</label>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("password")}</label>
           <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
             <Lock size={15} className="text-neutral-400" />
             <input
@@ -119,7 +129,7 @@ export default function DashboardLoginPage() {
           disabled={loading}
           className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory disabled:opacity-60"
         >
-          {loading ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+          {loading ? t("pleaseWait") : mode === "login" ? t("signIn") : t("createAccount")}
         </button>
       </form>
 
@@ -130,7 +140,7 @@ export default function DashboardLoginPage() {
         }}
         className="w-full text-center text-xs mt-5 text-neutral-500 underline"
       >
-        {mode === "login" ? "New restaurant? Create an account" : "Already have an account? Sign in"}
+        {mode === "login" ? t("newRestaurantSignUp") : t("haveAccountSignIn")}
       </button>
     </div>
   );

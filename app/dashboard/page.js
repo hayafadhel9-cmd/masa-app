@@ -3,10 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabaseClient";
-import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings } from "lucide-react";
+import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe } from "lucide-react";
+import { useLanguage } from "../../lib/LanguageContext";
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { lang, setLang, t } = useLanguage();
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [restaurants, setRestaurants] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -109,20 +111,20 @@ export default function DashboardPage() {
   const platformCut = (fee) => Math.round(fee * 0.18);
 
   const DASHBOARD_TABS = [
-    { key: "needsResponse", label: "Needs Response", count: pending.length },
-    { key: "confirmed", label: "Confirmed", count: confirmed.length },
-    { key: "history", label: "History", count: dined.length + noShows.length + cancelled.length },
+    { key: "needsResponse", label: t("needsResponseTab"), count: pending.length },
+    { key: "confirmed", label: t("confirmedStatus"), count: confirmed.length },
+    { key: "history", label: t("historyTab"), count: dined.length + noShows.length + cancelled.length },
   ];
 
   if (checkingAuth) {
-    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">Loading…</div>;
+    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">{t("loading")}</div>;
   }
 
   return (
     <div className="mx-auto max-w-2xl min-h-screen bg-white">
       <div className="px-6 py-4 flex items-center justify-between bg-teal">
         <div className="flex items-center gap-2 text-ivory text-sm font-medium">
-          <LayoutDashboard size={18} className="text-brass" /> Partner dashboard
+          <LayoutDashboard size={18} className="text-brass" /> {t("partnerDashboard")}
         </div>
         <div className="flex items-center gap-2">
           <select
@@ -137,16 +139,22 @@ export default function DashboardPage() {
             ))}
           </select>
           <button
+            onClick={() => setLang(lang === "en" ? "ar" : "en")}
+            className="flex items-center gap-1 text-xs rounded-full px-2 py-1 bg-white/10 text-ivory"
+          >
+            <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
+          </button>
+          <button
             onClick={() => router.push("/dashboard/settings")}
             className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
-            aria-label="Settings"
+            aria-label={t("settingsLabel")}
           >
             <Settings size={14} className="text-ivory" />
           </button>
           <button
             onClick={handleSignOut}
             className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
-            aria-label="Sign out"
+            aria-label={t("signOut")}
           >
             <LogOut size={14} className="text-ivory" />
           </button>
@@ -155,7 +163,7 @@ export default function DashboardPage() {
 
       {restaurants.length === 0 && (
         <div className="px-6 py-10 text-sm text-neutral-500">
-          No restaurant is linked to your account yet. If you believe this is a mistake, contact support.
+          {t("noRestaurantLinked")}
         </div>
       )}
 
@@ -165,11 +173,11 @@ export default function DashboardPage() {
             <h2 className="font-serif text-xl text-ink">{restaurant.name}</h2>
             {restaurant.subscription_status === "trial" ? (
               <span className="text-[10px] font-medium rounded-full px-2.5 py-1 bg-amber-100 text-amber-700">
-                Free trial
+                {t("freeTrial")}
               </span>
             ) : (
               <span className="text-[10px] font-medium rounded-full px-2.5 py-1 bg-green-100 text-green-700">
-                Active subscription
+                {t("activeSubscription")}
               </span>
             )}
           </div>
@@ -200,7 +208,7 @@ export default function DashboardPage() {
         {activeTab === "needsResponse" && (
         <>
         {pending.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">No new requests right now.</p>
+          <p className="text-xs py-3 text-neutral-400">{t("noNewRequests")}</p>
         )}
 
         <div className="flex flex-col gap-2 mb-5">
@@ -208,7 +216,7 @@ export default function DashboardPage() {
             <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-amber-50 border border-amber-100">
               <div>
                 <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name} · {b.party_size} guests
+                  {b.guest_name} · {t("guestsCount", { count: b.party_size })}
                   {b.occasion && (
                     <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-200 text-amber-800">
                       {b.occasion}
@@ -242,14 +250,14 @@ export default function DashboardPage() {
         {activeTab === "confirmed" && (
         <>
         {confirmed.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">No confirmed bookings yet.</p>
+          <p className="text-xs py-3 text-neutral-400">{t("noConfirmedYet")}</p>
         )}
         <div className="flex flex-col gap-2">
           {confirmed.map((b) => (
             <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-green-50 border border-green-100">
               <div>
                 <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name} · {b.party_size} guests
+                  {b.guest_name} · {t("guestsCount", { count: b.party_size })}
                   {b.occasion && (
                     <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                       {b.occasion}
@@ -265,13 +273,13 @@ export default function DashboardPage() {
                   onClick={() => markDined(b.id)}
                   className="text-[10px] rounded-full px-2 py-1 bg-teal text-ivory"
                 >
-                  Mark as Dined
+                  {t("markDined")}
                 </button>
                 <button
                   onClick={() => markNoShow(b.id)}
                   className="text-[10px] rounded-full px-2 py-1 bg-amber-100 text-amber-700"
                 >
-                  Mark no-show
+                  {t("markNoShow")}
                 </button>
               </div>
             </div>
@@ -283,20 +291,20 @@ export default function DashboardPage() {
         {activeTab === "history" && (
         <>
         {dined.length === 0 && noShows.length === 0 && cancelled.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">No booking history yet.</p>
+          <p className="text-xs py-3 text-neutral-400">{t("noHistoryYet")}</p>
         )}
 
         {dined.length > 0 && (
           <>
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-widest font-medium text-teal">Dined</span>
+              <span className="text-[10px] uppercase tracking-widest font-medium text-teal">{t("dined")}</span>
               <span className="text-[10px] rounded-full px-1.5 bg-teal/10 text-teal">{dined.length}</span>
             </div>
             <div className="flex flex-col gap-2 mb-5">
               {dined.map((b) => (
                 <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200">
                   <div className="text-sm font-medium text-neutral-600 flex items-center gap-2">
-                    {b.guest_name} · {b.party_size} guests
+                    {b.guest_name} · {t("guestsCount", { count: b.party_size })}
                     {b.occasion && (
                       <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                         {b.occasion}
@@ -316,7 +324,7 @@ export default function DashboardPage() {
           <>
             <div className="flex items-center gap-2 mb-2">
               <span className="text-[10px] uppercase tracking-widest font-medium text-red-700">
-                Charged no-shows
+                {t("chargedNoShows")}
               </span>
               <span className="text-[10px] rounded-full px-1.5 bg-red-100 text-red-700">{noShows.length}</span>
             </div>
@@ -328,24 +336,24 @@ export default function DashboardPage() {
                   <div key={b.id} className="rounded-lg p-3 bg-red-50 border border-red-100">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-ink flex items-center gap-2">
-                        {b.guest_name} · {b.party_size} guests
+                        {b.guest_name} · {t("guestsCount", { count: b.party_size })}
                         {b.occasion && (
                           <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                             {b.occasion}
                           </span>
                         )}
                       </span>
-                      <span className="text-xs font-medium text-red-700">Charged AED {total}</span>
+                      <span className="text-xs font-medium text-red-700">{t("chargedAed", { amount: total })}</span>
                     </div>
                     <div className="flex items-center justify-between mt-1">
                       <div className="text-[11px] text-neutral-500">
-                        Restaurant keeps AED {total - cut} · Held fee AED {cut}
+                        {t("restaurantKeepsFee", { keep: total - cut, fee: cut })}
                       </div>
                       <button
                         onClick={() => dismissNoShow(b.id)}
                         className="text-[10px] rounded-full px-2 py-1 bg-white border border-red-200 text-red-700"
                       >
-                        Dismiss
+                        {t("dismiss")}
                       </button>
                     </div>
                   </div>
@@ -359,7 +367,7 @@ export default function DashboardPage() {
           <>
             <div className="flex items-center gap-2 mb-2 mt-5">
               <span className="text-[10px] uppercase tracking-widest font-medium text-neutral-500">
-                Cancelled by guest
+                {t("cancelledByGuest")}
               </span>
               <span className="text-[10px] rounded-full px-1.5 bg-neutral-200 text-neutral-600">{cancelled.length}</span>
             </div>
@@ -368,14 +376,14 @@ export default function DashboardPage() {
                 <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200 flex items-center justify-between">
                   <div className="flex items-center justify-between flex-1">
                     <span className="text-sm font-medium text-neutral-500">
-                      {b.guest_name} · {b.party_size} guests
+                      {b.guest_name} · {t("guestsCount", { count: b.party_size })}
                     </span>
-                    <span className="text-xs text-neutral-400">{b.booking_date} · {b.booking_time} · table freed</span>
+                    <span className="text-xs text-neutral-400">{b.booking_date} · {b.booking_time} · {t("tableFreed")}</span>
                   </div>
                   <button
                     onClick={() => archiveCancelled(b.id)}
                     className="w-6 h-6 rounded-full flex items-center justify-center bg-neutral-200 ml-3 flex-shrink-0"
-                    aria-label="Dismiss"
+                    aria-label={t("dismiss")}
                   >
                     <X size={13} className="text-neutral-600" />
                   </button>
