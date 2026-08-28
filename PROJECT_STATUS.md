@@ -193,6 +193,39 @@ requested yet.
   `flex-1 flex flex-col`, and the empty-state got its own `flex-1 flex items-center
   justify-center` wrapper (the non-empty booking list is unaffected, still top-aligned).
   Verified live in both English and Arabic, both Current and Past tabs.
+- **Edit an existing booking (2026-08-29):** from My Bookings, a customer can now edit a
+  pending or confirmed booking's time, seating zone, or party size — a new "Edit" button
+  appears on the booking card next to Share, alongside the existing Cancel/Remove actions.
+  Because a change can affect the restaurant's real capacity, editing does **not** silently
+  update the existing row. Instead `submitEditBooking()` in `app/page.js`: (1) marks the
+  original booking `status = 'edited'` (a new status value, alongside `settled`/`archived`,
+  documented in `schema.sql`'s column comment), and (2) inserts a brand-new row with the
+  updated details and `status = 'pending'`, running through the exact same real
+  zone-capacity check used for a fresh booking (`.neq("id", editingBooking.id)` excludes
+  the booking being replaced from its own availability count, so editing a booking to the
+  same time/zone doesn't falsely report it as full). The new pending row needs no dashboard
+  changes at all — it flows into the restaurant's existing "Needs Response" tab exactly
+  like any other new booking, verified live. The edited-away original shows in the
+  customer's Past tab with a new "Edited" status pill (`editedStatus` key); the new request
+  shows in Current as "Awaiting confirmation," same as any pending booking. The edit screen
+  itself (`loadEditTimeAvailability` / `loadEditZoneAvailability`) reuses the same real
+  per-slot "N left" / "Fully booked" availability logic as the main booking flow, also
+  excluding the booking being edited from the counts. **The cutoff reuses the existing
+  cancellation-notice-hours setting**: `handleEditClick()` calls the same `canFreelyCancel()`
+  helper the free-cancellation check already uses, and shows a clear alert
+  (`editWindowClosed` key, "Too close to your reservation time to edit — please contact the
+  restaurant directly") instead of opening the edit screen when the booking is inside that
+  window. Tested live end-to-end against a disposable QA restaurant with a tracked
+  3-table Indoor zone: created a booking, edited its time/party size (7:00 PM/2 guests →
+  8:00 PM/3 guests), confirmed the original flipped to `edited` in Past, the new pending
+  row appeared correctly in the restaurant's Needs Response with no dashboard code changes,
+  and that accepting it worked through the ordinary accept flow. Also confirmed live that
+  the edit-window cutoff correctly blocks editing once a booking's date/time has passed
+  (real system-clock date rolled over past the test booking's time mid-session, which
+  triggered the `editWindowClosed` alert exactly as designed). **Not built:** editing the
+  occasion field (out of scope — only time/zone/party size were requested, since those are
+  the fields that affect capacity) and any dashboard-side UI to distinguish an edit-request
+  booking from a fresh one (deliberately, per the request — it's meant to look identical).
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
@@ -208,16 +241,14 @@ requested yet.
 ## In-progress work / what to pick up next
 The **zone/table capacity feature**, **menu management (with photo upload)**,
 **dashboard tabs with a "Dined" status + customer Current/Past tabs**, the
-**customer-app burgundy/gold visual redesign (+ real per-time-slot availability)**, and a
+**customer-app burgundy/gold visual redesign (+ real per-time-slot availability)**, a
 follow-up **copy-polish pass** (wordmark size, CTA wording, status-aware cancel wording,
-localizing the last two hardcoded-English spots) are all now complete end-to-end (as of
-2026-08-25). The redesign and copy pass were each tested live with a disposable QA
-restaurant account through the full flow (Discover → Restaurant → Book → Zone → Hold →
-Confirmed → My Bookings, both Current and Past), in both English and Arabic/RTL,
-including driving a real time slot to "Full" via a second real booking and confirming the
-UI reflected it, and confirming the cancel wording switches correctly between a pending
-and a confirmed booking. Next up is the visual floor plan builder (now item 1
-in the backlog below), unless the user redirects.
+localizing the last two hardcoded-English spots), and **editing an existing booking**
+(re-triggers restaurant approval as a fresh pending request) are all now complete
+end-to-end (as of 2026-08-29). Each was tested live with a disposable QA restaurant
+account — see the dated bullets above for what was specifically verified for the most
+recent feature. Nothing is currently in progress. Next up is the visual floor plan builder
+(now item 1 in the backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -239,18 +270,18 @@ trustworthy again, but if something seems off, verify against the live project
 1. Visual floor plan builder for the dashboard (drag/place individual tables, realistic
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
-2. Edit an existing booking (time/zone/party size) — should re-trigger restaurant
-   approval like a brand-new booking request, reusing the existing accept/decline +
-   capacity-check flow rather than inventing new logic
-3. Bill-split calculator (split a total by people or items, plus tip)
-4. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
-5. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
+2. Bill-split calculator (split a total by people or items, plus tip)
+3. Translate the dashboard/settings/login pages into Arabic (customer app is already done)
+4. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
    devices instead of relying on localStorage; this should also be the point where
    `bookings` RLS policies get properly tightened
-6. Real Stripe integration for the no-show card hold
-7. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+5. Real Stripe integration for the no-show card hold
+6. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
    for closer to actual app-store launch, since WhatsApp Business API needs its own
    account + approval process
+
+(Edit-an-existing-booking, previously item 2 here, is done — see the 2026-08-29 bullet
+above.)
 
 (The old "Mark as completed" backlog item is done — see "Mark as Dined" above. Note it's
 a manual restaurant action, not an automatic mark-after-time-passes; nobody has asked for

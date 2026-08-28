@@ -53,7 +53,7 @@ create table bookings (
   occasion text,                  -- e.g. "Birthday" | "Anniversary" | "Business" | null
   booking_time text not null,     -- e.g. "7:30 PM" (swap to a real timestamp for production)
   booking_date date not null default current_date,
-  status text default 'pending',  -- 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'no-show' | 'dined' | 'settled' (dismissed no-show) | 'archived' (dismissed cancellation)
+  status text default 'pending',  -- 'pending' | 'confirmed' | 'declined' | 'cancelled' | 'no-show' | 'dined' | 'edited' (superseded by a customer-requested change) | 'settled' (dismissed no-show) | 'archived' (dismissed cancellation)
   card_last4 text,                -- from Stripe, never store full card numbers
   stripe_payment_method_id text,  -- Stripe token reference, added when you wire up Stripe
   charged boolean default false,

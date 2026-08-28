@@ -74,6 +74,12 @@ export default function DinerPage() {
   const [zoneAvailability, setZoneAvailability] = useState({});
   const [timeAvailability, setTimeAvailability] = useState({});
   const [bookingsView, setBookingsView] = useState("current");
+  const [editingBooking, setEditingBooking] = useState(null);
+  const [editParty, setEditParty] = useState(2);
+  const [editTime, setEditTime] = useState("");
+  const [editZone, setEditZone] = useState(null);
+  const [editTimeAvailability, setEditTimeAvailability] = useState({});
+  const [editZoneAvailability, setEditZoneAvailability] = useState({});
 
   useEffect(() => {
     async function loadRestaurants() {
@@ -230,7 +236,12 @@ export default function DinerPage() {
       setMyBookings([]);
       return;
     }
-    const { data } = await supabase.from("bookings").select("*, restaurants(name, area, cancellation_notice_hours)").in("id", ids);
+    const { data } = await supabase
+      .from("bookings")
+      .select(
+        "*, restaurants(name, area, cancellation_notice_hours, zones, zone_capacity, opening_time, closing_time, max_party_size)"
+      )
+      .in("id", ids);
     const ordered = ids.map((id) => data?.find((b) => b.id === id)).filter(Boolean);
     setMyBookings(ordered);
   }
@@ -259,6 +270,140 @@ export default function DinerPage() {
     loadMyBookings();
   }
 
+  function handleEditClick(booking) {
+    if (!canFreelyCancel(booking, booking.restaurants?.cancellation_notice_hours ?? 2)) {
+      alert(t("editWindowClosed", { hours: booking.restaurants?.cancellation_notice_hours ?? 2 }));
+      return;
+    }
+    setEditingBooking(booking);
+    setEditParty(booking.party_size);
+    setEditTime(booking.booking_time);
+    setEditZone(booking.zone);
+  }
+
+  async function loadEditTimeAvailability(booking) {
+    const r = booking.restaurants;
+    const zones = r.zones && r.zones.length > 0 ? r.zones : ["Indoor"];
+    const capacity = r.zone_capacity || {};
+    const allTracked = zones.every((z) => (Number(capacity[z]) || 0) > 0);
+    if (!allTracked) {
+      setEditTimeAvailability({});
+      return;
+    }
+    const { data } = await supabase
+      .from("bookings")
+      .select("zone, booking_time")
+      .eq("restaurant_id", booking.restaurant_id)
+      .eq("booking_date", booking.booking_date)
+      .in("status", ["pending", "confirmed"])
+      .neq("id", booking.id);
+    const counts = {};
+    (data || []).forEach((x) => {
+      counts[x.booking_time] = counts[x.booking_time] || {};
+      counts[x.booking_time][x.zone] = (counts[x.booking_time][x.zone] || 0) + 1;
+    });
+    const availability = {};
+    generateTimeSlots(r.opening_time, r.closing_time).forEach((slot) => {
+      let remaining = 0;
+      zones.forEach((z) => {
+        const cap = Number(capacity[z]) || 0;
+        const used = counts[slot]?.[z] || 0;
+        remaining += Math.max(0, cap - used);
+      });
+      availability[slot] = remaining;
+    });
+    setEditTimeAvailability(availability);
+  }
+
+  async function loadEditZoneAvailability(booking, time) {
+    const r = booking.restaurants;
+    const zones = r.zones && r.zones.length > 0 ? r.zones : ["Indoor"];
+    const capacity = r.zone_capacity || {};
+    const { data } = await supabase
+      .from("bookings")
+      .select("zone")
+      .eq("restaurant_id", booking.restaurant_id)
+      .eq("booking_date", booking.booking_date)
+      .eq("booking_time", time)
+      .in("status", ["pending", "confirmed"])
+      .neq("id", booking.id);
+    const counts = {};
+    (data || []).forEach((x) => {
+      counts[x.zone] = (counts[x.zone] || 0) + 1;
+    });
+    const availability = {};
+    zones.forEach((z) => {
+      const cap = Number(capacity[z]) || 0;
+      availability[z] = cap > 0 && (counts[z] || 0) >= cap;
+    });
+    setEditZoneAvailability(availability);
+  }
+
+  useEffect(() => {
+    if (editingBooking) {
+      loadEditTimeAvailability(editingBooking);
+    }
+  }, [editingBooking]);
+
+  useEffect(() => {
+    if (editingBooking && editTime) {
+      loadEditZoneAvailability(editingBooking, editTime);
+    }
+  }, [editingBooking, editTime]);
+
+  async function submitEditBooking() {
+    const r = editingBooking.restaurants;
+    const capacity = r.zone_capacity || {};
+    const cap = Number(capacity[editZone]) || 0;
+    if (cap > 0) {
+      const { count } = await supabase
+        .from("bookings")
+        .select("id", { count: "exact", head: true })
+        .eq("restaurant_id", editingBooking.restaurant_id)
+        .eq("booking_date", editingBooking.booking_date)
+        .eq("booking_time", editTime)
+        .eq("zone", editZone)
+        .in("status", ["pending", "confirmed"])
+        .neq("id", editingBooking.id);
+      if ((count || 0) >= cap) {
+        const zoneLabel = ZONE_KEYS[editZone]?.label ? t(ZONE_KEYS[editZone].label) : editZone;
+        alert(t("zoneJustFilled", { zone: zoneLabel }));
+        loadEditZoneAvailability(editingBooking, editTime);
+        return;
+      }
+    }
+
+    await supabase.from("bookings").update({ status: "edited" }).eq("id", editingBooking.id);
+
+    const { data, error } = await supabase
+      .from("bookings")
+      .insert({
+        restaurant_id: editingBooking.restaurant_id,
+        guest_name: editingBooking.guest_name,
+        guest_phone: editingBooking.guest_phone,
+        party_size: editParty,
+        zone: editZone,
+        occasion: editingBooking.occasion,
+        booking_time: editTime,
+        booking_date: editingBooking.booking_date,
+        card_last4: editingBooking.card_last4,
+        status: "pending",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Edit booking failed:", error.message);
+      alert("Something went wrong submitting your change. Check the console for details.");
+      return;
+    }
+
+    addMyBookingId(data.id);
+    setEditingBooking(null);
+    setBookingsView("current");
+    await loadMyBookings();
+  }
+
   useEffect(() => {
     if (tab === "myBookings") {
       loadMyBookings();
@@ -274,7 +419,7 @@ export default function DinerPage() {
 
   const currentBookings = myBookings.filter((b) => b.status === "pending" || b.status === "confirmed");
   const pastBookings = myBookings.filter((b) =>
-    ["dined", "no-show", "cancelled", "declined"].includes(b.status)
+    ["dined", "no-show", "cancelled", "declined", "edited"].includes(b.status)
   );
   const visibleBookings = bookingsView === "current" ? currentBookings : pastBookings;
 
@@ -698,7 +843,128 @@ export default function DinerPage() {
         </div>
       )}
 
-      {tab === "myBookings" && (
+      {tab === "myBookings" && editingBooking && (
+        <div className="pt-4 flex-1 flex flex-col">
+          <button onClick={() => setEditingBooking(null)} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+          </button>
+          <h2 className="font-serif text-xl mt-2 text-charcoal">
+            {t("editReservation")} <span className="italic text-burgundy">{editingBooking.restaurants?.name}</span>
+          </h2>
+          <div className="w-8 h-0.5 bg-brass my-3.5" />
+          <p className="text-sm mb-5 text-muted">{editingBooking.booking_date}</p>
+
+          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("partySize")}</label>
+          <div className="flex items-center justify-between mt-2 mb-5 rounded-2xl px-4 py-3 bg-card">
+            <span className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              <Users size={14} /> {t("partySize")}
+            </span>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setEditParty(Math.max(1, editParty - 1))}
+                className="w-10 h-10 rounded-full flex items-center justify-center bg-tan text-burgundy text-lg"
+              >
+                −
+              </button>
+              <div className="text-base font-semibold text-charcoal min-w-[16px] text-center">{editParty}</div>
+              <button
+                type="button"
+                onClick={() =>
+                  setEditParty(Math.min(editingBooking.restaurants?.max_party_size ?? 14, editParty + 1))
+                }
+                className="w-10 h-10 rounded-full flex items-center justify-center bg-tan text-burgundy text-lg"
+              >
+                +
+              </button>
+            </div>
+          </div>
+
+          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("timeTonight")}</label>
+          <div className="grid grid-cols-3 gap-2 mt-2 mb-5">
+            {generateTimeSlots(editingBooking.restaurants?.opening_time, editingBooking.restaurants?.closing_time).map(
+              (tm) => {
+                const remaining = editTimeAvailability[tm];
+                const trackingEdit = Object.keys(editTimeAvailability).length > 0;
+                const full = trackingEdit && remaining === 0;
+                const selected = editTime === tm;
+                return (
+                  <button
+                    key={tm}
+                    disabled={full}
+                    onClick={() => setEditTime(tm)}
+                    className={`rounded-2xl py-2.5 text-xs font-semibold flex flex-col items-center gap-0.5 ${
+                      full
+                        ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
+                        : selected
+                        ? "bg-burgundy text-offwhite"
+                        : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {tm}
+                    {trackingEdit && (
+                      <span className={`text-[9px] font-medium ${full ? "text-warn" : selected ? "text-offwhite/70" : "text-muted"}`}>
+                        {full ? t("slotFull") : t("tablesLeft", { count: remaining })}
+                      </span>
+                    )}
+                  </button>
+                );
+              }
+            )}
+          </div>
+
+          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("whereSit")}</label>
+          <div className="flex flex-col gap-3 mt-2 mb-6">
+            {(editingBooking.restaurants?.zones && editingBooking.restaurants.zones.length > 0
+              ? editingBooking.restaurants.zones
+              : ["Indoor"]
+            ).map((z) => {
+              const Icon = ZONE_ICONS[z] || Home;
+              const selected = editZone === z;
+              const full = !!editZoneAvailability[z];
+              const zk = ZONE_KEYS[z] || { label: null, desc: null };
+              return (
+                <button
+                  key={z}
+                  disabled={full}
+                  onClick={() => setEditZone(z)}
+                  className={`flex items-center gap-3.5 rounded-[20px] p-4 text-left shadow-[0_4px_14px_rgba(43,31,33,0.05)] border ${
+                    full
+                      ? "bg-tan/30 border-transparent opacity-55 cursor-not-allowed"
+                      : selected
+                      ? "bg-card border-brass shadow-[0_6px_18px_rgba(43,31,33,0.1)]"
+                      : "bg-card border-transparent"
+                  }`}
+                >
+                  <div
+                    className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${
+                      selected && !full ? "bg-burgundy" : "bg-tan"
+                    }`}
+                  >
+                    <Icon size={18} className={selected && !full ? "text-offwhite" : "text-burgundy"} />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-charcoal">{zk.label ? t(zk.label) : z}</div>
+                    <div className={`text-xs mt-0.5 ${full ? "text-warn font-medium" : "text-muted"}`}>
+                      {full ? t("fullyBooked") : zk.desc ? t(zk.desc) : ""}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={submitEditBooking}
+            disabled={editZoneAvailability[editZone]}
+            className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)] disabled:opacity-50"
+          >
+            {t("sendChangeRequest")}
+          </button>
+        </div>
+      )}
+
+      {tab === "myBookings" && !editingBooking && (
         <div className="pt-6 flex-1 flex flex-col">
           <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("myBookings")}</h2>
 
@@ -743,6 +1009,8 @@ export default function DinerPage() {
                   ? { label: t("cancelled"), cls: "text-warn border-warn" }
                   : b.status === "no-show"
                   ? { label: t("noShowStatus"), cls: "text-warn border-warn" }
+                  : b.status === "edited"
+                  ? { label: t("editedStatus"), cls: "text-taupe border-taupe" }
                   : { label: b.status, cls: "text-muted border-muted" };
               return (
                 <div key={b.id} className="rounded-[20px] p-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
@@ -769,6 +1037,14 @@ export default function DinerPage() {
                     </button>
                   </div>
                   <div className="flex gap-2">
+                    {(b.status === "pending" || b.status === "confirmed") && (
+                      <button
+                        onClick={() => handleEditClick(b)}
+                        className="flex-1 text-xs font-medium rounded-full px-3 py-2.5 bg-tan text-charcoal"
+                      >
+                        {t("edit")}
+                      </button>
+                    )}
                     {canFreelyCancel(b, b.restaurants?.cancellation_notice_hours ?? 2) && (
                       <button
                         onClick={() => cancelBooking(b)}
