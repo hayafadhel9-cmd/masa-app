@@ -30,6 +30,20 @@ function addDays(date, days) {
   return d;
 }
 
+// Real bookable dates for a restaurant's min/max advance-booking window,
+// each with a locale-correct short weekday label (not hardcoded "Su/Mo/Tu…").
+function generateDateStrip(minAdvanceDays, maxAdvanceDays, locale) {
+  const formatter = new Intl.DateTimeFormat(locale, { weekday: "short" });
+  const min = minAdvanceDays ?? 0;
+  const max = maxAdvanceDays ?? 30;
+  const days = [];
+  for (let i = min; i <= max; i++) {
+    const d = addDays(new Date(), i);
+    days.push({ value: toLocalDateStr(d), weekday: formatter.format(d), day: d.getDate() });
+  }
+  return days;
+}
+
 export default function DinerPage() {
   const { lang, setLang, t } = useLanguage();
 
@@ -267,7 +281,7 @@ export default function DinerPage() {
   const trackingTimeAvailability = Object.keys(timeAvailability).length > 0;
 
   return (
-    <div className="mx-auto max-w-md min-h-screen bg-cream px-5 pb-28 relative">
+    <div className="mx-auto max-w-md min-h-screen bg-cream px-5 pb-28 relative flex flex-col">
       {tab === "discover" && screen === "home" && (
         <>
           <div className="flex items-center justify-between pt-6 mb-1">
@@ -403,14 +417,29 @@ export default function DinerPage() {
           <div className="w-8 h-0.5 bg-brass my-3.5" />
 
           <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("date")}</label>
-          <input
-            type="date"
-            value={bookingDate}
-            min={toLocalDateStr(addDays(new Date(), active.min_advance_days ?? 0))}
-            max={toLocalDateStr(addDays(new Date(), active.max_advance_days ?? 30))}
-            onChange={(e) => setBookingDate(e.target.value)}
-            className="w-full rounded-full px-4 py-3 text-sm mt-2 mb-5 outline-none bg-tan text-charcoal font-medium"
-          />
+          <div className="flex gap-2.5 overflow-x-auto mt-2 mb-5 pb-1">
+            {generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US").map(
+              (d) => {
+                const selected = bookingDate === d.value;
+                return (
+                  <button
+                    key={d.value}
+                    onClick={() => setBookingDate(d.value)}
+                    className="flex flex-col items-center gap-1.5 flex-shrink-0"
+                  >
+                    <span className="text-[10px] text-taupe font-medium uppercase">{d.weekday}</span>
+                    <span
+                      className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold ${
+                        selected ? "bg-burgundy text-offwhite" : "text-charcoal"
+                      }`}
+                    >
+                      {d.day}
+                    </span>
+                  </button>
+                );
+              }
+            )}
+          </div>
 
           <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("partySize")}</label>
           <div className="flex items-center justify-between mt-2 mb-5 rounded-2xl px-4 py-3 bg-card">
@@ -670,9 +699,8 @@ export default function DinerPage() {
       )}
 
       {tab === "myBookings" && (
-        <div className="pt-6">
-          <h2 className="font-serif text-2xl mb-1 text-charcoal">{t("myBookings")}</h2>
-          <p className="text-sm mb-5 text-muted">{t("myBookingsDesc")}</p>
+        <div className="pt-6 flex-1 flex flex-col">
+          <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("myBookings")}</h2>
 
           <div className="flex bg-tan rounded-full p-1 mb-5">
             <button
@@ -693,12 +721,13 @@ export default function DinerPage() {
             </button>
           </div>
 
-          {visibleBookings.length === 0 && (
-            <p className="text-sm text-taupe py-8 text-center">
-              {bookingsView === "current" ? t("myBookingsEmpty") : t("pastBookingsEmpty")}
-            </p>
-          )}
-
+          {visibleBookings.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-sm text-taupe text-center px-6">
+                {bookingsView === "current" ? t("myBookingsEmpty") : t("pastBookingsEmpty")}
+              </p>
+            </div>
+          ) : (
           <div className="flex flex-col gap-3">
             {visibleBookings.map((b) => {
               const statusInfo =
@@ -759,6 +788,7 @@ export default function DinerPage() {
               );
             })}
           </div>
+          )}
         </div>
       )}
 

@@ -169,6 +169,30 @@ requested yet.
   system exists yet, so it was pure placeholder. "Back," the name, and everything below now
   sit directly at the top of the screen with no empty gap. The now-unused `UtensilsCrossed`
   icon import was also removed from `app/page.js` since nothing references it anymore.
+- **Booking screen date picker replaced with a scrollable date-strip (2026-08-26):** the
+  native `<input type="date">` is replaced with a horizontally-scrollable row of day pills
+  (weekday abbreviation above, day number in a circle below, solid burgundy when selected),
+  matching the mockup's visual language. The underlying logic is unchanged — a new pure
+  helper, `generateDateStrip(minAdvanceDays, maxAdvanceDays, locale)` in `app/page.js`,
+  enumerates the restaurant's real bookable date range and writes into the same
+  `bookingDate` state the native input used to, so `loadTimeAvailability`,
+  `confirmBooking`, etc. all keep working unchanged. Weekday labels are generated via
+  `Intl.DateTimeFormat(locale, { weekday: "short" })` (real Arabic weekday names in Arabic
+  mode, not a hardcoded "Su/Mo/Tu…" set translated by hand). Verified live: a restaurant
+  with a 7-day window shows all days with no scroll needed; temporarily testing a 30-day
+  window on `test 2` (reverted after) confirmed the strip scrolls correctly and far-out
+  dates still flow through to `bookingDate` correctly; also confirmed correct RTL mirroring
+  and real Arabic weekday labels in Arabic mode.
+- **My Bookings copy/layout cleanup (2026-08-26):** removed the "Saved on this phone —
+  reservations you've made or that friends shared with you." subtitle entirely (and its
+  now-unused `myBookingsDesc` translation key); the empty-state message no longer uses a
+  dash ("Nothing here yet, book a table, or open a link a friend shared with you.");
+  Arabic updated to match (comma instead of an em-dash). The empty-state message is now
+  vertically centered in the space below the Current/Past tabs rather than sitting right
+  under them — the outer page wrapper became `flex flex-col`, the My Bookings block became
+  `flex-1 flex flex-col`, and the empty-state got its own `flex-1 flex items-center
+  justify-center` wrapper (the non-empty booking list is unaffected, still top-aligned).
+  Verified live in both English and Arabic, both Current and Past tabs.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
