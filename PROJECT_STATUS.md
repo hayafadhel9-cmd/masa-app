@@ -13,11 +13,10 @@ The app is named **Held**. All visible branding and user-facing text was renamed
 the old "Masa" placeholder to Held on 2026-08-25 (see "Brand direction" below for the
 full naming history). **Not renamed, deliberately:** the GitHub repo
 (`hayafadhel9-cmd/masa-app`), the Vercel project/URL, `package.json`'s `name` field, and
-a couple of internal (never user-visible) localStorage keys (`masa_lang`,
-`masa_my_booking_ids`) — these are infrastructure/internal identifiers, not branding, and
-renaming them is a separate, riskier task (breaking the live Vercel deploy URL,
-losing already-saved local "My Bookings" data for existing users, etc.) that hasn't been
-requested yet.
+the `masa_lang` localStorage key — these are infrastructure/internal identifiers, not
+branding, and renaming them is a separate, riskier task (breaking the live Vercel deploy
+URL) that hasn't been requested yet. (The other old internal key, `masa_my_booking_ids`,
+no longer exists — see the 2026-08-29 customer-accounts bullet below.)
 
 ## Tech stack
 - Next.js (App Router) + Tailwind CSS
@@ -26,16 +25,23 @@ requested yet.
 - GitHub: hayafadhel9-cmd/masa-app (repo name unchanged — see note above)
 
 ## Project structure
-- `app/page.js` — diner-facing app (browse, book, My Bookings tab)
-- `app/dashboard/page.js` — restaurant dashboard (requires login)
+- `app/page.js` — diner-facing app (Discover / My Bookings / Account tabs, booking flow,
+  customer auth)
+- `app/dashboard/page.js` — restaurant dashboard (requires login + restaurant ownership)
 - `app/dashboard/login/page.js` — restaurant sign up / login
 - `app/dashboard/settings/page.js` — restaurant self-serve settings (hours, fees, zones, etc.)
-- `app/booking/[id]/page.js` — public shareable booking view (for "share with friends")
-- `lib/supabaseClient.js` — Supabase client setup
-- `lib/myBookings.js` — localStorage helpers for guest "My Bookings" (no customer login yet)
+- `app/booking/[id]/page.js` — public shareable booking view (for "share with friends";
+  read-only — see the 2026-08-29 customer-accounts bullet for why the old "save to my
+  bookings" button on this page was removed)
+- `middleware.js` — refreshes the Supabase session cookie on every request and gates
+  `/dashboard/*` routes server-side (added 2026-08-29, see the security bullet below)
+- `lib/supabase/client.js` — Supabase **browser** client (`@supabase/ssr`, cookie-based
+  sessions — replaces the old `lib/supabaseClient.js`, which no longer exists)
+- `lib/passwordRules.js` — shared client-side password validation (min length + basic
+  complexity) used by both the restaurant and customer sign-up forms
 - `lib/bookingTime.js` — cancellation window logic
 - `lib/timeSlots.js` — generates time slots from opening/closing hours (handles overnight hours crossing midnight)
-- `lib/LanguageContext.js` — English/Arabic i18n + RTL support (customer app only so far)
+- `lib/LanguageContext.js` — English/Arabic i18n + RTL support (whole app)
 - `schema.sql` — full database schema, kept in sync with what's actually in Supabase
 
 ## What's fully working right now
@@ -281,17 +287,237 @@ requested yet.
   in `public/` (checked — the folder is empty) or anywhere else searched (Downloads,
   Desktop, Documents). The user confirmed doing the color change alone for now and will add
   the files separately before the icon-wiring half of this request is picked back up.
+- **Real customer accounts (2026-08-29):** diners now sign up / log in with email +
+  password (Supabase Auth, the same auth system restaurants use — there is only one
+  Supabase Auth user pool for the whole project, restaurants and customers are just rows
+  in different application tables, not different auth systems). Two decisions were made
+  with the user before building this:
+  1. **Login is required to complete a booking, browsing stays open to everyone.**
+     Discover and Restaurant Detail need no login. Reaching the final "Confirm & hold
+     table" step while logged out shows a sign-in/sign-up screen in place of the booking
+     confirmation (`screen === "authGate"` in `app/page.js`); on success, the exact same
+     booking the customer was mid-flow on completes immediately and automatically (no
+     re-entering party size/time/zone) — `confirmBooking()` accepts an optional user
+     override so it can use the freshly-returned `signUp`/`signInWithPassword` user
+     directly, without waiting on React state to catch up.
+  2. **A third "Account" tab was added to the bottom nav** (Discover / My Bookings /
+     Account). Logged out, it shows the same sign-up/login form. Logged in, it shows the
+     customer's name/email/phone (from `user.user_metadata`, not a separate `profiles`
+     table — email+password+full_name+phone was all "profile" needed, so a whole new
+     table/RLS surface for it wasn't justified), the language toggle (**moved here from
+     its old spot on the Discover screen header**, per the request), and Sign out.
+  3. **"My Bookings" is now fully account-linked**, replacing the old per-browser
+     localStorage tracking (`lib/myBookings.js`, deleted — nothing references it anymore).
+     `loadMyBookings()` now queries `bookings` by `user_id` instead of a locally-stored id
+     list, so bookings genuinely follow the customer across devices/browsers. The old
+     "Remove" button (which only ever meant "stop tracking this locally," never a real
+     delete) was removed from the Past-tab card — it has no meaning now that the list is
+     the customer's real account history, not something local to hide items from.
+  Sign-up collects full name + mobile number in addition to email/password (stored via
+  `supabase.auth.signUp({ options: { data: { full_name, phone } } })`). A shared
+  `CustomerAuthForm` component (defined once in `app/page.js`) is reused in three places:
+  the Account tab, the My-Bookings-while-logged-out prompt, and the booking auth gate.
+  **Deliberately not migrated:** bookings made before this feature (tracked only in a
+  guest's own browser via the old `masa_my_booking_ids` localStorage key) are left
+  exactly as they are in the database — per the user's explicit call, "existing
+  guest/localStorage bookings don't need to be migrated." A side effect worth knowing:
+  since "My Bookings" is now account-only, those old guest bookings are no longer
+  reachable through the customer app's UI at all (not hidden — just no code path reads
+  localStorage IDs anymore). The restaurant dashboard is completely unaffected, since it
+  has always queried by `restaurant_id`, never by customer identity. The old public
+  "Save to My Bookings" button on the shareable booking page (`app/booking/[id]/page.js`)
+  was also removed — it let a friend with no account (or a different account) adopt
+  someone else's booking into their own local list, which doesn't map onto real accounts
+  (RLS would block it anyway; it's not their booking). That page is now a pure read-only
+  invite view, matching its stated purpose.
+  **Tested live end-to-end** with disposable QA accounts: booked while logged out → hit
+  the auth gate → signed up with name/phone/email/password → booking completed
+  automatically with no re-entry → showed up correctly in My Bookings and in the
+  Account tab profile card → the same restaurant's real dashboard (logged in separately
+  as its owner) showed the booking in Needs Response exactly like any other, confirming
+  restaurant accounts are unaffected → confirmed a customer account navigating directly
+  to `/dashboard` gets redirected away by `middleware.js` before ever seeing dashboard
+  content. See the security bullet immediately below for the database/RLS side of this
+  feature and everything found/fixed during the accompanying security pass.
+- **Security hardening pass, done alongside the customer-accounts work (2026-08-29):**
+  the user asked for an 11-point audit given this was the first time the app handled real
+  (non-test) user accounts and data. For each item: what was found, and what was actually
+  changed.
+  1. **Session storage** — was Supabase's default (JWT in `localStorage`, readable by any
+     injected script). Migrated the **entire app** (both restaurant and customer auth, by
+     explicit user choice) to `@supabase/ssr` cookie-based sessions: `lib/supabase/client.js`
+     replaces the old raw `createClient()` call, and `middleware.js` refreshes the session
+     server-side on every request (calling `getUser()`, which re-validates against
+     Supabase's Auth server rather than trusting a locally-decoded JWT). Verified live:
+     `sb-<ref>-auth-token` is a cookie, not a `localStorage` key, after login. **Honest
+     caveat, not overclaimed:** because every page in this app is a Client Component that
+     queries Supabase directly from the browser (no Route Handlers or Server Components
+     do any data fetching), the access token still has to be readable by client-side JS
+     to make those calls — true `httpOnly`-only protection (the token never touching
+     client JS at all) would require moving those queries behind Route Handlers/Server
+     Actions, which is a much larger rearchitecture than "migrate session storage" and
+     was not attempted. What this migration *does* deliver: Secure/SameSite cookie
+     attributes, and independent server-side session verification everywhere
+     `middleware.js` runs (used concretely for the dashboard route gate below).
+  2. **Server-side admin/role checks** — audited every place that gates restaurant-only
+     content. `app/dashboard/*` pages already relied on RLS-scoped queries
+     (`.eq("owner_id", user.id)`) rather than a client-passed flag, which was already
+     sound. Added a genuine gap-closer: `middleware.js` now checks, server-side, on every
+     `/dashboard/*` request (except `/dashboard/login`): is there a session at all
+     (redirect to login if not), and — except for `/dashboard/settings`, which is also
+     where a first-time owner completes onboarding and can't require an existing
+     restaurant — does this user actually own a restaurant (redirect to `/` if not).
+     Verified live: a logged-in customer account requesting `/dashboard` directly is
+     redirected away before any dashboard content renders.
+  3. **Email verification** — confirmed OFF (new accounts get an active session
+     immediately with no confirmation click, which is how every restaurant QA account
+     created earlier this session worked). **This is a Supabase Dashboard-only setting
+     (Authentication → Sign In / Providers → Email → "Confirm email") — no tool available
+     here can read or change it**, so it hasn't been turned on; the user needs to flip it
+     in the dashboard. The code is written to handle both states correctly regardless of
+     when that happens: `signUp()`'s response is checked for `data.session` — if it's
+     null (confirmation required), a "check your email" screen is shown
+     (`confirmEmailTitle`/`confirmEmailBody` keys) instead of assuming immediate access.
+     This mattered immediately for the *existing* restaurant sign-up flow too: it used to
+     create the `restaurants` row inline right after `signUp()`, which only works with an
+     immediate session — turning on email confirmation would silently break restaurant
+     onboarding. Fixed regardless of whether the toggle ever gets flipped: restaurant
+     sign-up no longer creates the row inline (and no longer collects a restaurant name at
+     signup — that field was removed from the sign-up form since it's redundant with
+     onboarding); `app/dashboard/settings/page.js`'s save handler now inserts a brand-new
+     restaurant row on first save if none exists yet, instead of only ever updating one
+     (a latent bug — `if (!restaurant) return` — that happened to never fire before
+     because a row always pre-existed by the time settings loaded).
+  4. **Rate limiting** — Supabase Auth applies its own default per-IP rate limits to all
+     `/auth/v1/*` endpoints (sign-up, sign-in, password recovery, etc.) automatically;
+     this isn't something the app's own code enables or configures, and it isn't
+     customizable on the Free plan. No custom app-level rate limiting was built — with
+     zero real users yet, standing up bespoke infrastructure for it (this app has no
+     backend beyond Supabase itself; there's nowhere to hang custom rate-limit state
+     without adding one) isn't proportionate right now. Revisit if/when there's real
+     signup traffic to actually rate-limit.
+  5. **Password rules** — added `lib/passwordRules.js` (min 8 characters, at least one
+     letter and one number), used by both the customer and restaurant sign-up forms, with
+     matching translated hint text. This is explicitly a fail-fast UX layer, not the real
+     boundary — Supabase enforces its own minimum server-side regardless. Checked whether
+     "leaked password protection" (checks new passwords against HaveIBeenPwned) is
+     available: Supabase's own security advisor confirms the feature exists but is
+     currently **disabled** — again a Dashboard-only toggle (Authentication → Policies →
+     password settings) with no tool access to flip it here; needs the user to enable it.
+  6. **`bookings` RLS tightening** — this table's policies were fully open
+     (`using (true)` on select/insert/update) from before real customer accounts existed.
+     Added a `user_id uuid references auth.users(id)` column (nullable — old guest rows
+     keep `NULL`, per the "don't migrate old bookings" decision) and replaced the open
+     insert/update policies. Deliberate design, confirmed with the user first:
+     - **SELECT stays open** (`using (true)`) — the "Share with friends" feature lets
+       anyone with a booking's exact link/UUID view it with no account; the security
+       model for that was already "unguessable random ID," not RLS, and tightening SELECT
+       would have silently broken a feature that was explicitly built and tested earlier
+       in this project.
+     - **INSERT** now requires `auth.uid() = user_id` — only a logged-in customer can
+       create a booking for themselves; matches "login is required to book."
+     - **UPDATE** requires either `auth.uid() = user_id` (the owning customer) or that the
+       requester owns the restaurant the booking belongs to (a subquery against
+       `restaurants.owner_id`) — both able to update, restaurant owners for full
+       accept/decline/dined/no-show/settle/archive control, customers for cancelling or
+       triggering an edit.
+     - **Found and fixed a real gap during live testing of this**, not just designed on
+       paper: the first version of the UPDATE policy checked *row ownership* but not
+       *which values* were being written, so a customer could `PATCH` their own pending
+       booking straight to `status: "confirmed"` via a direct API call — self-approving
+       past the restaurant's accept/decline step entirely. Fixed by adding a value
+       constraint to the policy: a customer's own update is only allowed if the resulting
+       `status` is `cancelled` or `edited` (the only two statuses the customer-facing app
+       ever sets); a restaurant owner's update is unrestricted, preserving all existing
+       dashboard actions. Re-tested the same exploit afterward via a raw authenticated
+       `fetch()` call (bypassing the UI entirely) and confirmed it now returns
+       `403 new row violates row-level security policy`, while a legitimate cancel from
+       the same account still succeeds. Also tested and confirmed blocked: inserting a
+       booking with a spoofed `user_id` belonging to someone else (403).
+  7. **API keys / secrets** — confirmed only `NEXT_PUBLIC_SUPABASE_ANON_KEY` (the public
+     anon key, safe for client code) is used anywhere in the codebase; no service-role key
+     or other secret appears in any file. Searched the full `git log -p` history for
+     Supabase key patterns, `service_role`, Stripe-style `sk_live`/`sk_test` prefixes, and
+     JWT-shaped strings outside `NEXT_PUBLIC_*` — nothing found. `.env.local` is
+     `.gitignore`d and confirmed to have never been committed (`git log --all
+     --full-history -- .env.local` returns nothing).
+  8. **Input sanitization** — confirmed zero uses of `dangerouslySetInnerHTML` anywhere in
+     the codebase (React's default escaping is relied on everywhere strings are
+     rendered), and confirmed every Supabase call uses the parameterized query builder
+     (`.eq()`, `.insert()`, etc.) — no raw SQL string concatenation exists anywhere in the
+     app.
+  9. **Menu-photo upload security** — was functionally working but had **no real
+     server-side validation**: the `menu-photos` Storage bucket had no `file_size_limit`
+     or `allowed_mime_types` set, and the app only checked `accept="image/*"` on the
+     `<input>`, a client-side hint an attacker can trivially bypass (e.g. calling the
+     Storage API directly, exactly as demonstrated for the RLS tests above). Fixed at the
+     real enforcement layer: the bucket now has `file_size_limit = 5MB` and
+     `allowed_mime_types` restricted to `image/jpeg|png|webp|gif`, set directly on
+     `storage.buckets` via migration. Added matching client-side validation
+     (`validatePhotoFile()` in `app/dashboard/settings/page.js`) purely as faster feedback
+     for legitimate users — the bucket-level settings are what actually block anything
+     bypassing the UI.
+  10. **Security headers / production hardening** — `next.config.js` previously set no
+      headers at all. Added `Content-Security-Policy` (scoped to `'self'` plus the
+      Supabase project host for API/image/websocket traffic — no other third-party hosts
+      exist in this app), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+      `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive
+      `Permissions-Policy`, and `Strict-Transport-Security`. Verified live via
+      `curl -I` against a real `next start` production build that all headers are present
+      on both normal responses and the middleware's redirect responses. **Honest caveat:**
+      the CSP's `script-src` still includes `'unsafe-inline' 'unsafe-eval'`, which
+      Next.js's own runtime needs unless the app adopts a nonce-based CSP (a bigger,
+      separate change) — so this materially reduces third-party script/frame injection
+      risk but doesn't fully eliminate inline-script XSS on its own. HTTPS: Vercel
+      enforces this by default for all deployments; nothing to configure, and nothing
+      that could be verified from this local-only environment. No dev-only routes or
+      debug endpoints exist to worry about — the app has zero API routes / Route Handlers
+      at all currently. Console logging was audited: the only `console.error` calls
+      anywhere log a Supabase `error.message` string, never a token, password, or other
+      sensitive value.
+  11. **Cost safety** — the Supabase organization is confirmed on the **Free plan**, which
+      has hard usage limits/pausing rather than usage-based billing, so there's no
+      "surprise bill" risk to alert on there. Vercel's plan/billing settings aren't
+      visible from this environment — the user should check their own Vercel dashboard
+      for any spend-alert configuration if that project is on a paid tier.
+  Two items above are **manual, dashboard-only actions the user still needs to take** —
+  no tool available in this environment can read or change Supabase Auth project
+  settings: **(a)** enable "Confirm email" under Authentication → Sign In / Providers →
+  Email, and **(b)** enable "Leaked password protection" under Authentication → Policies.
+  The app's code already handles both correctly once enabled (see items 3 and 5 above).
+  A pre-existing, unrelated finding surfaced by Supabase's own advisor during this pass:
+  `restaurant_tables` has RLS enabled with zero policies (meaning it denies all access to
+  everyone) — this table has no code path reading or writing it anywhere in the app, so
+  it's inert dead schema, not a live vulnerability; left as-is since removing/fixing an
+  unused table wasn't part of this request.
+  Also fixed in passing, found via `npm install`: 4 pre-existing high-severity `npm audit`
+  findings in Next.js's own dependency chain (DoS/XSS/SSRF advisories fixed upstream).
+  Bumped `next` from the pinned `15.5.9` to `15.5.24` (a same-major patch release) and ran
+  `npm audit fix` for the rest; one moderate `postcss` advisory remains, only fixable by
+  a Next.js 15→16 major upgrade (a separate, much larger change with its own regression
+  risk) — deliberately left as an accepted, disclosed risk rather than bundled into this
+  pass.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
-- No customer login yet — "My Bookings" is tracked per-browser via localStorage, not a real account
-- RLS (row-level security) on `bookings` is fairly open (`using (true)` on several policies)
-  since customer login doesn't exist yet — this is a known gap to tighten once customer
-  accounts are built
+- Customer accounts exist now (2026-08-29 — see the bullet above), but email verification
+  and leaked-password protection are still OFF at the Supabase project level — both need
+  the user to flip a Dashboard toggle; the app's code already handles either state
+  correctly (see the security bullet above)
+- `bookings` RLS was tightened alongside customer accounts (2026-08-29): writes are scoped
+  to the owning customer or the owning restaurant; reads intentionally stay open so
+  "Share with friends" keeps working via unguessable booking links — see the security
+  bullet above for the exact policy shapes and the self-approval gap that was found and
+  closed during that work
 - Capacity checking is per-zone (e.g., "5 tables in Outdoor"), NOT per-specific-table yet.
   A real visual floor plan (named/placed individual tables) is a planned future feature.
 - No real-time notifications (SMS/WhatsApp) — restaurants only see new bookings if they're
   looking at the dashboard, or via Supabase realtime updates while the tab is open
+- Full httpOnly session isolation isn't achieved (see the session-storage security bullet
+  above for exactly why) — the access token is still readable by client-side JS since
+  every page queries Supabase directly from the browser; closing that gap fully would
+  require moving data-fetching behind Route Handlers/Server Actions, a larger
+  rearchitecture not attempted here
 
 ## In-progress work / what to pick up next
 The **zone/table capacity feature**, **menu management (with photo upload)**,
@@ -304,16 +530,26 @@ for the restaurant dashboard, settings, and login pages** are all now complete e
 (as of 2026-08-29). Each was tested live with a disposable QA restaurant account — see
 the dated bullets above for what was specifically verified for the two most recent
 features. The **no-show fee disclosure/card field bug fix** and the **cream color update
-to #F1E9D6** (2026-08-29) are also both done — see the dated bullets above. **Pending:**
-wiring up the 8 new "Held" wordmark icon files as the favicon/apple-touch-icon/manifest
-icons — the user asked for this alongside the color change, but the files aren't actually
-in `public/` yet (confirmed empty). Once the user adds `held-wordmark-icon-29.png` through
-`held-wordmark-icon-1024.png` to `public/`, pick this up: reference appropriately-sized
-ones from `app/layout.js`'s `metadata.icons` (favicon, apple-touch-icon) and create/update
-a `manifest.json` (none exists yet) to list the larger sizes for PWA install icons, then
-verify the favicon renders in an actual browser tab before considering it done — a build
-passing isn't sufficient proof for this kind of change. Next up after that is the visual
-floor plan builder (now item 1 in the backlog below), unless the user redirects.
+to #F1E9D6** (2026-08-29) are also both done — see the dated bullets above. **Real
+customer accounts and the accompanying 11-point security hardening pass** (2026-08-29,
+see the two large bullets above) are also complete and tested live — this was the
+largest single piece of work in the project so far: cookie-based sessions app-wide,
+server-side dashboard route gating, a tightened `bookings` RLS model (with a real
+self-approval exploit found and closed during testing, not just designed on paper), menu
+photo upload limits enforced server-side, security headers, and a dependency vulnerability
+fix. **Two manual follow-ups only the user can do** (no tool here can touch Supabase Auth
+project settings): enable "Confirm email" and "Leaked password protection" in the
+Supabase Dashboard's Authentication settings — see the security bullet above for exactly
+where. **Pending, unrelated:** wiring up the 8 new "Held" wordmark icon files as the
+favicon/apple-touch-icon/manifest icons — the user asked for this alongside the cream
+color change, but the files aren't actually in `public/` yet (confirmed empty). Once the
+user adds `held-wordmark-icon-29.png` through `held-wordmark-icon-1024.png` to `public/`,
+pick this up: reference appropriately-sized ones from `app/layout.js`'s `metadata.icons`
+(favicon, apple-touch-icon) and create/update a `manifest.json` (none exists yet) to list
+the larger sizes for PWA install icons, then verify the favicon renders in an actual
+browser tab before considering it done — a build passing isn't sufficient proof for this
+kind of change. Next up after that is the visual floor plan builder (now item 1 in the
+backlog below), unless the user redirects.
 
 **Note on Supabase Storage RLS policies:** when writing a policy on `storage.objects`
 that joins back to another table (e.g. `restaurants`) inside an `exists (select ... from
@@ -336,13 +572,14 @@ trustworthy again, but if something seems off, verify against the live project
    layout, live status) — restaurant-side first, then a customer-facing cinema-style
    seat picker built on top of it later
 2. Bill-split calculator (split a total by people or items, plus tip)
-3. Customer login (Supabase Auth, separate from restaurant login) — sync bookings across
-   devices instead of relying on localStorage; this should also be the point where
-   `bookings` RLS policies get properly tightened
-4. Real Stripe integration for the no-show card hold
-5. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
+3. Real Stripe integration for the no-show card hold
+4. In-app notifications first, then real SMS/WhatsApp (via Twilio) — deliberately saved
    for closer to actual app-store launch, since WhatsApp Business API needs its own
    account + approval process
+
+(Customer login, previously item 3 here, is done — see the 2026-08-29 bullets above.
+Real Stripe integration would also be a good time to move file-upload-style secrets, if
+any get introduced, to a proper server-side integration rather than client-only code.)
 
 (Edit-an-existing-booking and dashboard/settings/login Arabic translation, both
 previously items 2 and 4 here, are done — see the 2026-08-29 bullets above.)

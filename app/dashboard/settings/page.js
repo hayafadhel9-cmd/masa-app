@@ -7,6 +7,21 @@ import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide
 import { useLanguage } from "../../../lib/LanguageContext";
 
 const MENU_PHOTOS_BUCKET = "menu-photos";
+// Mirrors the menu-photos storage bucket's own file_size_limit and
+// allowed_mime_types (the real, server-enforced boundary) — this is just
+// faster feedback for legitimate users, not the security check itself.
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+function validatePhotoFile(file, t) {
+  if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
+    return t("photoTypeInvalid");
+  }
+  if (file.size > MAX_PHOTO_BYTES) {
+    return t("photoTooLarge");
+  }
+  return null;
+}
 
 function extractStoragePath(url) {
   if (!url) return null;
@@ -125,6 +140,12 @@ function RestaurantSettingsInner() {
   function handleNewDishFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
+    const issue = validatePhotoFile(file, t);
+    if (issue) {
+      alert(issue);
+      e.target.value = "";
+      return;
+    }
     setNewDishFile(file);
     setNewDishPreview(URL.createObjectURL(file));
   }
@@ -550,6 +571,12 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
   function handleFile(e) {
     const f = e.target.files?.[0];
     if (!f) return;
+    const issue = validatePhotoFile(f, t);
+    if (issue) {
+      alert(issue);
+      e.target.value = "";
+      return;
+    }
     setFile(f);
     setPreview(URL.createObjectURL(f));
   }

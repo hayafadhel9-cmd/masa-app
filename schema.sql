@@ -162,8 +162,15 @@ create policy "Owners can delete their own menu items"
 -- Storage bucket for menu dish photos, uploaded by restaurant owners from Settings.
 -- Public read (so the diner-facing app can display photos); writes restricted to the
 -- owner of the restaurant matching the object's folder ({restaurant_id}/filename).
-insert into storage.buckets (id, name, public)
-values ('menu-photos', 'menu-photos', true)
+-- file_size_limit/allowed_mime_types are the real, server-enforced upload validation
+-- (added 2026-08-29) — the app's own client-side checks are just faster feedback for
+-- legitimate users, not the actual security boundary.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values (
+  'menu-photos', 'menu-photos', true,
+  5242880, -- 5 MB
+  array['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+)
 on conflict (id) do nothing;
 
 create policy "Public can view menu photos"
