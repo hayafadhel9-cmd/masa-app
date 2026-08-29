@@ -46,6 +46,10 @@ create table menu_items (
 create table bookings (
   id uuid primary key default uuid_generate_v4(),
   restaurant_id uuid references restaurants(id) on delete cascade,
+  user_id uuid references auth.users(id),  -- the customer account that made this booking;
+                                            -- NULL on bookings made before real customer
+                                            -- accounts existed (2026-08-29) — deliberately
+                                            -- left unmigrated, see PROJECT_STATUS.md
   guest_name text not null,
   guest_phone text not null,
   party_size integer not null,
@@ -63,21 +67,58 @@ create table bookings (
 -- Basic indexes for the queries you'll run constantly
 create index idx_bookings_restaurant on bookings(restaurant_id);
 create index idx_bookings_status on bookings(status);
+create index idx_bookings_user_id on bookings(user_id);
 
 -- Row Level Security: turn on before going live so restaurants only see their own data
 alter table restaurants enable row level security;
 alter table bookings enable row level security;
 
--- Example starter policy (tighten this once you add restaurant login/auth):
 -- allow anyone to read restaurant listings (public browsing)
 create policy "Public can view restaurants"
   on restaurants for select
   using (true);
 
--- allow anyone to insert a booking (diners booking a table)
-create policy "Anyone can create a booking"
+-- Bookings RLS (tightened 2026-08-29 alongside real customer accounts — see
+-- PROJECT_STATUS.md's security section for the full reasoning and the
+-- self-approval exploit that was found and closed while designing this):
+--
+-- SELECT stays open on purpose: "Share with friends" lets anyone with a
+-- booking's exact link/UUID view it with no account — the security model for
+-- that is "unguessable random ID," not RLS.
+create policy "Anyone can view bookings"
+  on bookings for select
+  using (true);
+
+-- Only a logged-in customer can create a booking, and only for themselves.
+create policy "Customers can create their own bookings"
   on bookings for insert
-  with check (true);
+  with check (auth.uid() = user_id);
+
+-- The owning customer can update their own booking, but ONLY to cancel it or
+-- mark it superseded by an edit — not to self-approve past the restaurant's
+-- accept/decline step (this value-level check is the fix for a real exploit
+-- found during testing: without it, a customer could PATCH their own pending
+-- booking straight to status='confirmed'). A restaurant owner can update any
+-- booking that belongs to their own restaurant, to any status (accept,
+-- decline, mark dined/no-show, settle, archive).
+create policy "Owning customer or restaurant can update a booking"
+  on bookings for update
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1 from restaurants
+      where restaurants.id = bookings.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  )
+  with check (
+    (auth.uid() = user_id and status in ('cancelled', 'edited'))
+    or exists (
+      select 1 from restaurants
+      where restaurants.id = bookings.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
 
 -- Restaurant owners manage their own menu items (public read policy for menu_items
 -- already exists: "Public can view menu items")

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../../../lib/supabaseClient";
+import { supabase } from "../../../lib/supabase/client";
 import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 
@@ -191,7 +191,6 @@ function RestaurantSettingsInner() {
 
   async function handleSave(e) {
     e.preventDefault();
-    if (!restaurant) return;
     setSaving(true);
     setSavedMsg("");
     setSaveError(false);
@@ -199,25 +198,41 @@ function RestaurantSettingsInner() {
     zones.forEach((z) => {
       cleanedCapacity[z] = Number(zoneCapacity[z]) || 0;
     });
-    const { error } = await supabase
-      .from("restaurants")
-      .update({
-        name,
-        cuisine,
-        area,
-        price_tier: priceTier,
-        no_show_fee_aed: Number(noShowFee),
-        cancellation_notice_hours: Number(noticeHours),
-        zones: zones.length > 0 ? zones : ["Indoor"],
-        opening_time: openingTime,
-        closing_time: closingTime,
-        party_sizes: partySizes.length > 0 ? partySizes : [2, 4, 6, 8],
-        min_advance_days: Number(minAdvanceDays),
-        max_advance_days: Number(maxAdvanceDays),
-        max_party_size: Number(maxPartySize),
-        zone_capacity: cleanedCapacity,
-      })
-      .eq("id", restaurant.id);
+    const payload = {
+      name,
+      cuisine,
+      area,
+      price_tier: priceTier,
+      no_show_fee_aed: Number(noShowFee),
+      cancellation_notice_hours: Number(noticeHours),
+      zones: zones.length > 0 ? zones : ["Indoor"],
+      opening_time: openingTime,
+      closing_time: closingTime,
+      party_sizes: partySizes.length > 0 ? partySizes : [2, 4, 6, 8],
+      min_advance_days: Number(minAdvanceDays),
+      max_advance_days: Number(maxAdvanceDays),
+      max_party_size: Number(maxPartySize),
+      zone_capacity: cleanedCapacity,
+    };
+
+    let error;
+    if (restaurant) {
+      ({ error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id));
+    } else {
+      // First-time save with no existing row yet — happens when a restaurant
+      // owner reaches onboarding without a pre-created restaurant (e.g. email
+      // confirmation was required at signup, so the row couldn't be created
+      // until they had an active session).
+      const { data: userData } = await supabase.auth.getUser();
+      const { data, error: insertError } = await supabase
+        .from("restaurants")
+        .insert({ ...payload, owner_id: userData.user?.id, subscription_status: "trial" })
+        .select()
+        .single();
+      error = insertError;
+      if (data) setRestaurant(data);
+    }
+
     setSaving(false);
     if (error) {
       setSaveError(true);
@@ -235,7 +250,7 @@ function RestaurantSettingsInner() {
     return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">{t("loading")}</div>;
   }
 
-  if (!restaurant) {
+  if (!restaurant && !isOnboarding) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-ivory px-6 pt-16 text-sm text-neutral-500">
         {t("noRestaurantLinked")}
@@ -471,53 +486,55 @@ function RestaurantSettingsInner() {
         </button>
       </form>
 
-      <div className="mt-8 pt-6 border-t border-neutral-200">
-        <h2 className="font-serif text-xl text-ink mb-1">{t("menu")}</h2>
-        <p className="text-sm text-neutral-500 mb-4">{t("menuSectionHint")}</p>
+      {restaurant && (
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="font-serif text-xl text-ink mb-1">{t("menu")}</h2>
+          <p className="text-sm text-neutral-500 mb-4">{t("menuSectionHint")}</p>
 
-        <div className="flex flex-col gap-2 mb-4">
-          {menuItems.length === 0 && <p className="text-xs text-neutral-400">{t("noMenuItems")}</p>}
-          {menuItems.map((item) => (
-            <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} t={t} />
-          ))}
-        </div>
-
-        <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
-          <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-2">{t("addADish")}</div>
-          <div className="flex items-center gap-2 mb-2">
-            <label className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden border border-neutral-200">
-              {newDishPreview ? (
-                <img src={newDishPreview} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <Camera size={16} className="text-neutral-400" />
-              )}
-              <input type="file" accept="image/*" className="hidden" onChange={handleNewDishFile} />
-            </label>
-            <input
-              value={newDishName}
-              onChange={(e) => setNewDishName(e.target.value)}
-              placeholder={t("dishNamePlaceholder")}
-              className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-            />
-            <input
-              type="number"
-              min="0"
-              value={newDishPrice}
-              onChange={(e) => setNewDishPrice(e.target.value)}
-              placeholder={t("aedPlaceholder")}
-              className="w-20 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-            />
+          <div className="flex flex-col gap-2 mb-4">
+            {menuItems.length === 0 && <p className="text-xs text-neutral-400">{t("noMenuItems")}</p>}
+            {menuItems.map((item) => (
+              <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} t={t} />
+            ))}
           </div>
-          <button
-            type="button"
-            onClick={addMenuItem}
-            disabled={addingDish || !newDishName.trim() || !newDishPrice}
-            className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
-          >
-            <Plus size={13} /> {addingDish ? t("adding") : t("addDish")}
-          </button>
+
+          <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
+            <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-2">{t("addADish")}</div>
+            <div className="flex items-center gap-2 mb-2">
+              <label className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden border border-neutral-200">
+                {newDishPreview ? (
+                  <img src={newDishPreview} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <Camera size={16} className="text-neutral-400" />
+                )}
+                <input type="file" accept="image/*" className="hidden" onChange={handleNewDishFile} />
+              </label>
+              <input
+                value={newDishName}
+                onChange={(e) => setNewDishName(e.target.value)}
+                placeholder={t("dishNamePlaceholder")}
+                className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+              />
+              <input
+                type="number"
+                min="0"
+                value={newDishPrice}
+                onChange={(e) => setNewDishPrice(e.target.value)}
+                placeholder={t("aedPlaceholder")}
+                className="w-20 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addMenuItem}
+              disabled={addingDish || !newDishName.trim() || !newDishPrice}
+              className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Plus size={13} /> {addingDish ? t("adding") : t("addDish")}
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../../lib/supabaseClient";
-import { LayoutDashboard, Mail, Lock, Globe } from "lucide-react";
+import { supabase } from "../../../lib/supabase/client";
+import { LayoutDashboard, Mail, Lock, Globe, MailCheck } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
+import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../../../lib/passwordRules";
 
 export default function DashboardLoginPage() {
   const router = useRouter();
@@ -12,9 +13,9 @@ export default function DashboardLoginPage() {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [restaurantName, setRestaurantName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [confirmationPending, setConfirmationPending] = useState(false);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -32,31 +33,41 @@ export default function DashboardLoginPage() {
   async function handleSignup(e) {
     e.preventDefault();
     setError("");
-    setLoading(true);
 
+    const passwordIssue = passwordRuleMessage(password, t);
+    if (passwordIssue) {
+      setError(passwordIssue);
+      return;
+    }
+
+    setLoading(true);
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
+    setLoading(false);
     if (signUpError) {
-      setLoading(false);
       setError(signUpError.message);
       return;
     }
 
-    const userId = signUpData.user?.id;
-    if (userId) {
-      const { error: insertError } = await supabase.from("restaurants").insert({
-        name: restaurantName || "My Restaurant",
-        owner_id: userId,
-        subscription_status: "trial",
-      });
-      if (insertError) {
-        setLoading(false);
-        setError("Account created, but restaurant setup failed: " + insertError.message);
-        return;
-      }
+    if (!signUpData.session) {
+      // Email confirmation is required on this project — there's no active
+      // session yet, so the restaurant row can't be created until they
+      // confirm and log in (see handleSave in settings/page.js for the
+      // first-time-insert path that runs at that point).
+      setConfirmationPending(true);
+      return;
     }
 
-    setLoading(false);
     router.push("/dashboard/settings?onboarding=true");
+  }
+
+  if (confirmationPending) {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16 text-center">
+        <MailCheck size={32} className="text-teal mx-auto mb-4" />
+        <h1 className="font-serif text-xl text-ink mb-2">{t("confirmEmailTitle")}</h1>
+        <p className="text-sm text-neutral-500">{t("confirmEmailBody", { email })}</p>
+      </div>
+    );
   }
 
   return (
@@ -78,19 +89,6 @@ export default function DashboardLoginPage() {
       </p>
 
       <form onSubmit={mode === "login" ? handleLogin : handleSignup} className="flex flex-col gap-4">
-        {mode === "signup" && (
-          <div>
-            <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("restaurantName")}</label>
-            <input
-              value={restaurantName}
-              onChange={(e) => setRestaurantName(e.target.value)}
-              placeholder={t("restaurantNamePlaceholder")}
-              className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-              required
-            />
-          </div>
-        )}
-
         <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("email")}</label>
           <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
@@ -117,9 +115,12 @@ export default function DashboardLoginPage() {
               placeholder="••••••••"
               className="flex-1 bg-transparent outline-none text-sm"
               required
-              minLength={6}
+              minLength={PASSWORD_MIN_LENGTH}
             />
           </div>
+          {mode === "signup" && (
+            <p className="text-[11px] text-neutral-400 mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
+          )}
         </div>
 
         {error && <p className="text-xs text-red-600">{error}</p>}

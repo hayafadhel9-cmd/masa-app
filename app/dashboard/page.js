@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../lib/supabaseClient";
+import { supabase } from "../../lib/supabase/client";
 import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe } from "lucide-react";
 import { useLanguage } from "../../lib/LanguageContext";
 
