@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { supabase } from "../../../lib/supabaseClient";
-import { addMyBookingId } from "../../../lib/myBookings";
-import { Cake, Heart, Briefcase, MapPin, Clock, Users, Check, BookmarkPlus } from "lucide-react";
+import { supabase } from "../../../lib/supabase/client";
+import { Cake, Heart, Briefcase, MapPin, Clock, Users } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 
 const OCCASION_ICONS = {
@@ -18,7 +17,6 @@ export default function SharedBookingPage() {
   const { id } = useParams();
   const [booking, setBooking] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -32,11 +30,6 @@ export default function SharedBookingPage() {
     }
     if (id) load();
   }, [id]);
-
-  function saveToMyBookings() {
-    addMyBookingId(id);
-    setSaved(true);
-  }
 
   if (loading) {
     return <div className="max-w-md mx-auto min-h-screen bg-cream px-5 pt-10 text-taupe text-sm">Loading…</div>;
@@ -86,20 +79,10 @@ export default function SharedBookingPage() {
         </div>
       </div>
 
-      {saved ? (
-        <div className="w-full rounded-full py-4 text-sm font-semibold flex items-center justify-center gap-2 bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]">
-          <Check size={15} /> Saved to My Bookings
-        </div>
-      ) : (
-        <button
-          onClick={saveToMyBookings}
-          className="w-full rounded-full py-4 text-sm font-semibold flex items-center justify-center gap-2 bg-brass text-charcoal"
-        >
-          <BookmarkPlus size={15} /> Save to My Bookings
-        </button>
-      )}
-
-      <a href="/" className="block text-center text-xs mt-5 text-muted underline">
+      <a
+        href="/"
+        className="w-full rounded-full py-4 text-sm font-semibold flex items-center justify-center gap-2 bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]"
+      >
         Browse more restaurants
       </a>
     </div>

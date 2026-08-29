@@ -1,12 +1,105 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
-import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock } from "lucide-react";
-import { addMyBookingId, getMyBookingIds, removeMyBookingId } from "../lib/myBookings";
+import { supabase } from "../lib/supabase/client";
+import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock, User, LogOut, MailCheck } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
+import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
+
+function CustomerAuthForm({
+  mode,
+  setMode,
+  email,
+  setEmail,
+  password,
+  setPassword,
+  fullName,
+  setFullName,
+  phone,
+  setPhone,
+  error,
+  loading,
+  confirmationPending,
+  onSubmit,
+  t,
+}) {
+  if (confirmationPending) {
+    return (
+      <div className="rounded-2xl p-5 bg-card text-center">
+        <MailCheck size={28} className="text-burgundy mx-auto mb-3" />
+        <div className="font-serif text-lg text-charcoal mb-1">{t("confirmEmailTitle")}</div>
+        <p className="text-sm text-muted">{t("confirmEmailBody", { email })}</p>
+      </div>
+    );
+  }
+  return (
+    <form onSubmit={onSubmit} className="flex flex-col gap-4">
+      {mode === "signup" && (
+        <>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("fullName")}</label>
+            <input
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              required
+              className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("mobileNumber")}</label>
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              required
+              className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
+            />
+          </div>
+        </>
+      )}
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("email")}</label>
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          required
+          className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
+        />
+      </div>
+      <div>
+        <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("password")}</label>
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          minLength={PASSWORD_MIN_LENGTH}
+          className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
+        />
+        {mode === "signup" && (
+          <p className="text-[11px] text-taupe mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
+        )}
+      </div>
+      {error && <p className="text-xs text-warn">{error}</p>}
+      <button
+        type="submit"
+        disabled={loading}
+        className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+      >
+        {loading ? t("pleaseWait") : mode === "login" ? t("signIn") : t("createAccount")}
+      </button>
+      <button
+        type="button"
+        onClick={() => setMode(mode === "login" ? "signup" : "login")}
+        className="text-center text-xs text-muted underline"
+      >
+        {mode === "login" ? t("newCustomerSignUp") : t("haveAccountSignIn")}
+      </button>
+    </form>
+  );
+}
 
 const ZONE_ICONS = {
   Indoor: Home,
@@ -80,6 +173,90 @@ export default function DinerPage() {
   const [editZone, setEditZone] = useState(null);
   const [editTimeAvailability, setEditTimeAvailability] = useState({});
   const [editZoneAvailability, setEditZoneAvailability] = useState({});
+
+  const [user, setUser] = useState(null);
+  const [authMode, setAuthMode] = useState("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authFullName, setAuthFullName] = useState("");
+  const [authPhone, setAuthPhone] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authConfirmationPending, setAuthConfirmationPending] = useState(false);
+  const [pendingBookingAfterAuth, setPendingBookingAfterAuth] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => setUser(data.user || null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  function resetAuthForm() {
+    setAuthEmail("");
+    setAuthPassword("");
+    setAuthFullName("");
+    setAuthPhone("");
+    setAuthError("");
+    setAuthConfirmationPending(false);
+  }
+
+  async function handleAuthSubmit(e) {
+    e.preventDefault();
+    setAuthError("");
+
+    if (authMode === "signup") {
+      const passwordIssue = passwordRuleMessage(authPassword, t);
+      if (passwordIssue) {
+        setAuthError(passwordIssue);
+        return;
+      }
+      setAuthLoading(true);
+      const { data, error } = await supabase.auth.signUp({
+        email: authEmail,
+        password: authPassword,
+        options: { data: { full_name: authFullName, phone: authPhone } },
+      });
+      setAuthLoading(false);
+      if (error) {
+        setAuthError(error.message);
+        return;
+      }
+      if (!data.session) {
+        setAuthConfirmationPending(true);
+        return;
+      }
+      resetAuthForm();
+      if (pendingBookingAfterAuth) {
+        setPendingBookingAfterAuth(false);
+        confirmBooking(data.user);
+      } else {
+        setScreen("home");
+      }
+      return;
+    }
+
+    setAuthLoading(true);
+    const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
+    setAuthLoading(false);
+    if (error) {
+      setAuthError(error.message);
+      return;
+    }
+    resetAuthForm();
+    if (pendingBookingAfterAuth) {
+      setPendingBookingAfterAuth(false);
+      confirmBooking(data.user);
+    }
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    setUser(null);
+    setTab("discover");
+    setScreen("home");
+  }
 
   useEffect(() => {
     async function loadRestaurants() {
@@ -183,7 +360,13 @@ export default function DinerPage() {
     }
   }, [screen, active, bookingDate, time]);
 
-  async function confirmBooking() {
+  async function confirmBooking(userOverride) {
+    const bookingUser = userOverride || user;
+    if (!bookingUser) {
+      setPendingBookingAfterAuth(true);
+      setScreen("authGate");
+      return;
+    }
     const capacity = active.zone_capacity || {};
     const cap = Number(capacity[zone]) || 0;
     if (cap > 0) {
@@ -207,6 +390,7 @@ export default function DinerPage() {
       .from("bookings")
       .insert({
         restaurant_id: active.id,
+        user_id: bookingUser.id,
         guest_name: name || "Guest",
         guest_phone: phone || "N/A",
         party_size: party,
@@ -225,14 +409,12 @@ export default function DinerPage() {
       alert("Something went wrong submitting your booking. Check the console for details.");
       return;
     }
-    addMyBookingId(data.id);
     setLastBooking(data);
     setScreen("confirmed");
   }
 
   async function loadMyBookings() {
-    const ids = getMyBookingIds();
-    if (ids.length === 0) {
+    if (!user) {
       setMyBookings([]);
       return;
     }
@@ -241,9 +423,9 @@ export default function DinerPage() {
       .select(
         "*, restaurants(name, area, cancellation_notice_hours, zones, zone_capacity, opening_time, closing_time, max_party_size)"
       )
-      .in("id", ids);
-    const ordered = ids.map((id) => data?.find((b) => b.id === id)).filter(Boolean);
-    setMyBookings(ordered);
+      .eq("user_id", user.id)
+      .order("created_at", { ascending: false });
+    setMyBookings(data || []);
   }
 
   function shareBooking(booking) {
@@ -262,11 +444,6 @@ export default function DinerPage() {
       booking.status === "confirmed" ? t("confirmCancelReservation") : t("confirmCancelRequest");
     if (!confirm(confirmMsg)) return;
     await supabase.from("bookings").update({ status: "cancelled" }).eq("id", booking.id);
-    loadMyBookings();
-  }
-
-  function removeFromMyBookings(id) {
-    removeMyBookingId(id);
     loadMyBookings();
   }
 
@@ -379,6 +556,7 @@ export default function DinerPage() {
       .from("bookings")
       .insert({
         restaurant_id: editingBooking.restaurant_id,
+        user_id: user.id,
         guest_name: editingBooking.guest_name,
         guest_phone: editingBooking.guest_phone,
         party_size: editParty,
@@ -398,7 +576,6 @@ export default function DinerPage() {
       return;
     }
 
-    addMyBookingId(data.id);
     setEditingBooking(null);
     setBookingsView("current");
     await loadMyBookings();
@@ -408,7 +585,7 @@ export default function DinerPage() {
     if (tab === "myBookings") {
       loadMyBookings();
     }
-  }, [tab]);
+  }, [tab, user]);
 
   const filtered = restaurants.filter(
     (r) =>
@@ -429,17 +606,7 @@ export default function DinerPage() {
     <div className="mx-auto max-w-md min-h-screen bg-cream px-5 pb-28 relative flex flex-col">
       {tab === "discover" && screen === "home" && (
         <>
-          <div className="flex items-center justify-between pt-6 mb-1">
-            <div className="font-serif text-[52px] font-extrabold text-burgundy leading-none">Held</div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setLang(lang === "en" ? "ar" : "en")}
-                className="flex items-center gap-1 text-xs rounded-full px-2.5 py-2 bg-tan text-burgundy font-medium"
-              >
-                <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
-              </button>
-            </div>
-          </div>
+          <div className="font-serif text-[52px] font-extrabold text-burgundy leading-none pt-6">Held</div>
           <div className="w-8 h-0.5 bg-brass my-3.5" />
           <p className="text-sm mb-5 text-muted">{t("subheadline")}</p>
 
@@ -793,7 +960,7 @@ export default function DinerPage() {
           )}
 
           <button
-            onClick={confirmBooking}
+            onClick={() => confirmBooking()}
             className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)] mb-3"
           >
             {t("confirmHold")}
@@ -801,6 +968,39 @@ export default function DinerPage() {
           {active.no_show_fee_aed > 0 && (
             <p className="text-[11px] text-center text-taupe">{t("cardDisclaimer")}</p>
           )}
+        </div>
+      )}
+
+      {tab === "discover" && screen === "authGate" && (
+        <div className="pt-4 flex-1 flex flex-col">
+          <button
+            onClick={() => {
+              setPendingBookingAfterAuth(false);
+              resetAuthForm();
+              setScreen("hold");
+            }}
+            className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium"
+          >
+            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+          </button>
+          <h2 className="font-serif text-xl mt-2 mb-5 text-charcoal">{t("signInToBook")}</h2>
+          <CustomerAuthForm
+            mode={authMode}
+            setMode={setAuthMode}
+            email={authEmail}
+            setEmail={setAuthEmail}
+            password={authPassword}
+            setPassword={setAuthPassword}
+            fullName={authFullName}
+            setFullName={setAuthFullName}
+            phone={authPhone}
+            setPhone={setAuthPhone}
+            error={authError}
+            loading={authLoading}
+            confirmationPending={authConfirmationPending}
+            onSubmit={handleAuthSubmit}
+            t={t}
+          />
         </div>
       )}
 
@@ -851,7 +1051,31 @@ export default function DinerPage() {
         </div>
       )}
 
-      {tab === "myBookings" && editingBooking && (
+      {tab === "myBookings" && !user && (
+        <div className="pt-6 flex-1 flex flex-col">
+          <h2 className="font-serif text-2xl mb-2 text-charcoal">{t("myBookings")}</h2>
+          <p className="text-sm text-muted mb-6">{t("myBookingsLoginPrompt")}</p>
+          <CustomerAuthForm
+            mode={authMode}
+            setMode={setAuthMode}
+            email={authEmail}
+            setEmail={setAuthEmail}
+            password={authPassword}
+            setPassword={setAuthPassword}
+            fullName={authFullName}
+            setFullName={setAuthFullName}
+            phone={authPhone}
+            setPhone={setAuthPhone}
+            error={authError}
+            loading={authLoading}
+            confirmationPending={authConfirmationPending}
+            onSubmit={handleAuthSubmit}
+            t={t}
+          />
+        </div>
+      )}
+
+      {tab === "myBookings" && user && editingBooking && (
         <div className="pt-4 flex-1 flex flex-col">
           <button onClick={() => setEditingBooking(null)} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
             <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
@@ -972,7 +1196,7 @@ export default function DinerPage() {
         </div>
       )}
 
-      {tab === "myBookings" && !editingBooking && (
+      {tab === "myBookings" && user && !editingBooking && (
         <div className="pt-6 flex-1 flex flex-col">
           <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("myBookings")}</h2>
 
@@ -1061,17 +1285,63 @@ export default function DinerPage() {
                         {b.status === "confirmed" ? t("cancelReservation") : t("cancelRequest")}
                       </button>
                     )}
-                    <button
-                      onClick={() => removeFromMyBookings(b.id)}
-                      className="flex-1 text-xs font-medium rounded-full px-3 py-2.5 bg-tan text-muted"
-                    >
-                      {t("remove")}
-                    </button>
                   </div>
                 </div>
               );
             })}
           </div>
+          )}
+        </div>
+      )}
+
+      {tab === "account" && (
+        <div className="pt-6 flex-1 flex flex-col">
+          <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("account")}</h2>
+          {!user ? (
+            <>
+              <p className="text-sm text-muted mb-6">{t("accountLoginPrompt")}</p>
+              <CustomerAuthForm
+                mode={authMode}
+                setMode={setAuthMode}
+                email={authEmail}
+                setEmail={setAuthEmail}
+                password={authPassword}
+                setPassword={setAuthPassword}
+                fullName={authFullName}
+                setFullName={setAuthFullName}
+                phone={authPhone}
+                setPhone={setAuthPhone}
+                error={authError}
+                loading={authLoading}
+                confirmationPending={authConfirmationPending}
+                onSubmit={handleAuthSubmit}
+                t={t}
+              />
+            </>
+          ) : (
+            <>
+              <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
+                <div className="font-serif text-lg text-charcoal mb-1">
+                  {user.user_metadata?.full_name || t("guest")}
+                </div>
+                <div className="text-xs text-muted">{user.email}</div>
+                {user.user_metadata?.phone && (
+                  <div className="text-xs text-muted mt-0.5">{user.user_metadata.phone}</div>
+                )}
+              </div>
+              <button
+                onClick={() => setLang(lang === "en" ? "ar" : "en")}
+                className="flex items-center gap-2 rounded-full px-4 py-3 mb-3 bg-card text-charcoal text-sm font-medium"
+              >
+                <Globe size={16} /> {lang === "en" ? "عربي" : "English"}
+              </button>
+              <button
+                onClick={handleSignOut}
+                className="flex items-center gap-2 rounded-full px-4 py-3 bg-card text-warn text-sm font-medium"
+              >
+                <LogOut size={16} /> {t("signOutCustomer")}
+              </button>
+            </>
           )}
         </div>
       )}
@@ -1094,6 +1364,15 @@ export default function DinerPage() {
         >
           <BookMarked size={20} />
           {t("myBookings")}
+        </button>
+        <button
+          onClick={() => setTab("account")}
+          className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
+            tab === "account" ? "text-burgundy" : "text-taupe"
+          }`}
+        >
+          <User size={20} />
+          {t("account")}
         </button>
       </div>
     </div>
