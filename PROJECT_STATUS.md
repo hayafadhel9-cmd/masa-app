@@ -369,25 +369,37 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
      restaurant — does this user actually own a restaurant (redirect to `/` if not).
      Verified live: a logged-in customer account requesting `/dashboard` directly is
      redirected away before any dashboard content renders.
-  3. **Email verification** — confirmed OFF (new accounts get an active session
-     immediately with no confirmation click, which is how every restaurant QA account
-     created earlier this session worked). **This is a Supabase Dashboard-only setting
-     (Authentication → Sign In / Providers → Email → "Confirm email") — no tool available
-     here can read or change it**, so it hasn't been turned on; the user needs to flip it
-     in the dashboard. The code is written to handle both states correctly regardless of
-     when that happens: `signUp()`'s response is checked for `data.session` — if it's
-     null (confirmation required), a "check your email" screen is shown
-     (`confirmEmailTitle`/`confirmEmailBody` keys) instead of assuming immediate access.
-     This mattered immediately for the *existing* restaurant sign-up flow too: it used to
-     create the `restaurants` row inline right after `signUp()`, which only works with an
-     immediate session — turning on email confirmation would silently break restaurant
-     onboarding. Fixed regardless of whether the toggle ever gets flipped: restaurant
-     sign-up no longer creates the row inline (and no longer collects a restaurant name at
-     signup — that field was removed from the sign-up form since it's redundant with
-     onboarding); `app/dashboard/settings/page.js`'s save handler now inserts a brand-new
-     restaurant row on first save if none exists yet, instead of only ever updating one
-     (a latent bug — `if (!restaurant) return` — that happened to never fire before
-     because a row always pre-existed by the time settings loaded).
+  3. **Email verification** — was confirmed OFF when this audit was first done (new
+     accounts got an active session immediately with no confirmation click). **The user
+     has since enabled "Confirm email" in the Supabase Dashboard (Authentication → Sign
+     In / Providers → Email) — this is now ON in the live project (2026-08-29).** The code
+     was written to handle both states correctly regardless of when the toggle got
+     flipped: `signUp()`'s response is checked for `data.session` — if it's null
+     (confirmation required, which is now always the case for a real signup), a "check
+     your email" screen is shown (`confirmEmailTitle`/`confirmEmailBody` keys) instead of
+     assuming immediate access. This mattered immediately for the *existing* restaurant
+     sign-up flow too: it used to create the `restaurants` row inline right after
+     `signUp()`, which only works with an immediate session — turning on email
+     confirmation would have silently broken restaurant onboarding. Fixed regardless of
+     the toggle: restaurant sign-up no longer creates the row inline (and no longer
+     collects a restaurant name at signup — that field was removed from the sign-up form
+     since it's redundant with onboarding); `app/dashboard/settings/page.js`'s save
+     handler now inserts a brand-new restaurant row on first save if none exists yet,
+     instead of only ever updating one (a latent bug — `if (!restaurant) return` — that
+     happened to never fire before because a row always pre-existed by the time settings
+     loaded). **Re-verified live after the toggle was flipped:** attempting to sign up
+     with an `@example.com` address (this session's disposable-QA-account convention)
+     now fails outright with `Email address "..." is invalid` on both the customer and
+     restaurant sign-up forms, confirmed on both — Supabase now validates deliverability
+     since it has to actually send a confirmation email, and `example.com` is a
+     non-deliverable reserved domain. The error surfaces correctly through the existing
+     `setError(signUpError.message)` handling on both forms, no orphaned rows were created
+     by the rejected attempts, and this isn't a bug: it's Supabase's own enforcement
+     working as intended. **Testing implication for future sessions:** the
+     `...@example.com` throwaway-account pattern used throughout this project's QA testing
+     no longer works for exercising the sign-up flow end-to-end (it fails before an
+     account is even created) — a real, deliverable test mailbox is needed to click
+     through an actual confirmation link and verify the post-confirmation login path.
   4. **Rate limiting** — Supabase Auth applies its own default per-IP rate limits to all
      `/auth/v1/*` endpoints (sign-up, sign-in, password recovery, etc.) automatically;
      this isn't something the app's own code enables or configures, and it isn't
@@ -402,8 +414,14 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
      boundary — Supabase enforces its own minimum server-side regardless. Checked whether
      "leaked password protection" (checks new passwords against HaveIBeenPwned) is
      available: Supabase's own security advisor confirms the feature exists but is
-     currently **disabled** — again a Dashboard-only toggle (Authentication → Policies →
-     password settings) with no tool access to flip it here; needs the user to enable it.
+     currently **disabled**. **Known, accepted gap (2026-08-29):** enabling it requires
+     Supabase's Pro plan (~$25/month); the user has decided to stay on the Free plan for
+     now and is deliberately not paying for this specific protection at this stage. This
+     is a business decision, not something to work around in code — there is no
+     client-side or free-tier equivalent worth building as a substitute (a real
+     breached-password check requires a server-side service like HaveIBeenPwned's API,
+     which is exactly what the Pro-plan feature already wraps). Revisit enabling the
+     toggle if/when the project upgrades to Pro for other reasons.
   6. **`bookings` RLS tightening** — this table's policies were fully open
      (`using (true)` on select/insert/update) from before real customer accounts existed.
      Added a `user_id uuid references auth.users(id)` column (nullable — old guest rows
@@ -480,11 +498,18 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
       "surprise bill" risk to alert on there. Vercel's plan/billing settings aren't
       visible from this environment — the user should check their own Vercel dashboard
       for any spend-alert configuration if that project is on a paid tier.
-  Two items above are **manual, dashboard-only actions the user still needs to take** —
-  no tool available in this environment can read or change Supabase Auth project
-  settings: **(a)** enable "Confirm email" under Authentication → Sign In / Providers →
-  Email, and **(b)** enable "Leaked password protection" under Authentication → Policies.
-  The app's code already handles both correctly once enabled (see items 3 and 5 above).
+  **Update (2026-08-29, after this audit was written):** both manual items above are now
+  resolved, one way or the other, by the user directly in the Supabase Dashboard — no tool
+  in this environment can read or change Supabase Auth project settings, so this always
+  required the user's own action:
+  - **(a) "Confirm email" is now enabled.** Re-verified live — see item 3 above for what
+    changed in practice (Supabase now rejects non-deliverable test addresses like
+    `@example.com` outright) and the resulting testing-pattern implication for future
+    sessions.
+  - **(b) "Leaked password protection" stays disabled — accepted, not pending.** It
+    requires Supabase's Pro plan (~$25/month); the user has decided to remain on the Free
+    plan for now, so this is a deliberate, documented gap rather than an outstanding
+    to-do. See item 5 above. Revisit only if/when the project upgrades to Pro.
   A pre-existing, unrelated finding surfaced by Supabase's own advisor during this pass:
   `restaurant_tables` has RLS enabled with zero policies (meaning it denies all access to
   everyone) — this table has no code path reading or writing it anywhere in the app, so
@@ -500,10 +525,13 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
-- Customer accounts exist now (2026-08-29 — see the bullet above), but email verification
-  and leaked-password protection are still OFF at the Supabase project level — both need
-  the user to flip a Dashboard toggle; the app's code already handles either state
-  correctly (see the security bullet above)
+- Customer accounts exist now (2026-08-29 — see the bullet above). Email verification is
+  now ON at the Supabase project level (the user enabled it after this feature shipped).
+  Leaked-password protection remains OFF — **deliberately, an accepted gap**: it requires
+  Supabase's Pro plan, and the project is staying on Free for now; this is a business
+  decision to revisit only if/when the project upgrades, not something to fix in code.
+  See the security bullet above for what changed in practice once email confirmation
+  went live (notably: `@example.com` test addresses are now rejected by Supabase itself).
 - `bookings` RLS was tightened alongside customer accounts (2026-08-29): writes are scoped
   to the owning customer or the owning restaurant; reads intentionally stay open so
   "Share with friends" keeps working via unguessable booking links — see the security
@@ -537,10 +565,12 @@ largest single piece of work in the project so far: cookie-based sessions app-wi
 server-side dashboard route gating, a tightened `bookings` RLS model (with a real
 self-approval exploit found and closed during testing, not just designed on paper), menu
 photo upload limits enforced server-side, security headers, and a dependency vulnerability
-fix. **Two manual follow-ups only the user can do** (no tool here can touch Supabase Auth
-project settings): enable "Confirm email" and "Leaked password protection" in the
-Supabase Dashboard's Authentication settings — see the security bullet above for exactly
-where. **Pending, unrelated:** wiring up the 8 new "Held" wordmark icon files as the
+fix. **Both manual Supabase Dashboard follow-ups are now resolved** (2026-08-29, after the
+fact — no tool here could touch Supabase Auth project settings, so these always needed
+the user directly): "Confirm email" is enabled, and "Leaked password protection" is a
+deliberate, accepted gap (requires the Pro plan; staying on Free for now) rather than a
+pending action — see item 3 and item 5 in the security bullet above for what each one
+means in practice now. **Pending, unrelated:** wiring up the 8 new "Held" wordmark icon files as the
 favicon/apple-touch-icon/manifest icons — the user asked for this alongside the cream
 color change, but the files aren't actually in `public/` yet (confirmed empty). Once the
 user adds `held-wordmark-icon-29.png` through `held-wordmark-icon-1024.png` to `public/`,
