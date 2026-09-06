@@ -7,6 +7,7 @@ import { LayoutDashboard, Mail, Lock, Globe, MailCheck, Eye, EyeOff, AlertTriang
 import { useLanguage } from "../../../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../../../lib/passwordRules";
 import { useCapsLockWarning } from "../../../lib/useCapsLockWarning";
+import { authErrorMessage } from "../../../lib/authErrorMessage";
 
 export default function DashboardLoginPage() {
   const router = useRouter();
@@ -27,7 +28,7 @@ export default function DashboardLoginPage() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) {
-      setError(error.message);
+      setError(authErrorMessage(error, t));
       return;
     }
     router.push("/dashboard");
@@ -47,7 +48,7 @@ export default function DashboardLoginPage() {
     const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
     setLoading(false);
     if (signUpError) {
-      setError(signUpError.message);
+      setError(authErrorMessage(signUpError, t));
       return;
     }
 

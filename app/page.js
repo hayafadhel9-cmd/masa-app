@@ -8,6 +8,7 @@ import { generateTimeSlots } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
+import { authErrorMessage } from "../lib/authErrorMessage";
 
 function CustomerAuthForm({
   mode,
@@ -241,7 +242,7 @@ export default function DinerPage() {
       });
       setAuthLoading(false);
       if (error) {
-        setAuthError(error.message);
+        setAuthError(authErrorMessage(error, t));
         return;
       }
       if (!data.session) {
@@ -262,7 +263,7 @@ export default function DinerPage() {
     const { data, error } = await supabase.auth.signInWithPassword({ email: authEmail, password: authPassword });
     setAuthLoading(false);
     if (error) {
-      setAuthError(error.message);
+      setAuthError(authErrorMessage(error, t));
       return;
     }
     resetAuthForm();
