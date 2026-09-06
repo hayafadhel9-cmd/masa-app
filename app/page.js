@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock, User, LogOut, MailCheck } from "lucide-react";
+import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock, User, LogOut, MailCheck, Eye, EyeOff } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
+import { useCapsLockWarning } from "../lib/useCapsLockWarning";
 
 function CustomerAuthForm({
   mode,
@@ -25,6 +26,9 @@ function CustomerAuthForm({
   onSubmit,
   t,
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+  const { capsLockOn, checkCapsLock } = useCapsLockWarning();
+
   if (confirmationPending) {
     return (
       <div className="rounded-2xl p-5 bg-card text-center">
@@ -70,14 +74,31 @@ function CustomerAuthForm({
       </div>
       <div>
         <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("password")}</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={PASSWORD_MIN_LENGTH}
-          className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
-        />
+        <div className="relative mt-2">
+          <input
+            type={showPassword ? "text" : "password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={checkCapsLock}
+            onKeyUp={checkCapsLock}
+            required
+            minLength={PASSWORD_MIN_LENGTH}
+            className="w-full rounded-full px-4 py-3 pe-11 text-sm outline-none bg-tan text-charcoal"
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword((v) => !v)}
+            aria-label={showPassword ? t("hidePassword") : t("showPassword")}
+            className="absolute inset-y-0 end-1 flex items-center px-3 text-taupe"
+          >
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </div>
+        {capsLockOn && (
+          <p className="text-[11px] text-warn mt-1.5 flex items-center gap-1">
+            <AlertTriangle size={11} /> {t("capsLockWarning")}
+          </p>
+        )}
         {mode === "signup" && (
           <p className="text-[11px] text-taupe mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
         )}

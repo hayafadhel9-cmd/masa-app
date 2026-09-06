@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase/client";
-import { LayoutDashboard, Mail, Lock, Globe, MailCheck } from "lucide-react";
+import { LayoutDashboard, Mail, Lock, Globe, MailCheck, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../../../lib/passwordRules";
+import { useCapsLockWarning } from "../../../lib/useCapsLockWarning";
 
 export default function DashboardLoginPage() {
   const router = useRouter();
@@ -13,6 +14,8 @@ export default function DashboardLoginPage() {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const { capsLockOn, checkCapsLock } = useCapsLockWarning();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmationPending, setConfirmationPending] = useState(false);
@@ -109,15 +112,30 @@ export default function DashboardLoginPage() {
           <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
             <Lock size={15} className="text-neutral-400" />
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={checkCapsLock}
+              onKeyUp={checkCapsLock}
               placeholder="••••••••"
               className="flex-1 bg-transparent outline-none text-sm"
               required
               minLength={PASSWORD_MIN_LENGTH}
             />
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? t("hidePassword") : t("showPassword")}
+              className="text-neutral-400 flex-shrink-0"
+            >
+              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
           </div>
+          {capsLockOn && (
+            <p className="text-[11px] text-red-600 mt-1.5 flex items-center gap-1">
+              <AlertTriangle size={11} /> {t("capsLockWarning")}
+            </p>
+          )}
           {mode === "signup" && (
             <p className="text-[11px] text-neutral-400 mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
           )}

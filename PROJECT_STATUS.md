@@ -522,6 +522,23 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   a Next.js 15→16 major upgrade (a separate, much larger change with its own regression
   risk) — deliberately left as an accepted, disclosed risk rather than bundled into this
   pass.
+- **Password field usability additions (2026-09-07):** every password input in the app
+  (customer sign-in/sign-up and restaurant sign-in/sign-up — both share the same
+  `type={showPassword ? "text" : "password"}` pattern) now has a show/hide eye-icon toggle
+  inside the field, and shows a "Caps Lock is on" warning while it's active. The Caps Lock
+  detection is a small shared hook, `lib/useCapsLockWarning.js` (`onKeyDown`/`onKeyUp` →
+  `event.getModifierState("CapsLock")`), used identically by both forms since the
+  underlying browser API is the same regardless of each form's very different visual
+  styling — only the show/hide toggle markup and warning message placement were written
+  per-form to match each one's existing layout. Verified live in the browser, including
+  in Arabic/RTL: the eye icon correctly mirrors to the start (left) side of the field in
+  both forms — Tailwind's logical `end-*`/`pe-*` utilities on the customer form's
+  absolutely-positioned button, and ordinary flexbox row reversal on the restaurant
+  form's icon-inside-a-flex-row layout. The Caps Lock warning was verified by dispatching
+  a synthetic keyboard event with a mocked `getModifierState` (Chrome's own remote-control
+  automation doesn't reliably toggle the real OS-level Caps Lock modifier for
+  `getModifierState` to read), and confirmed it appears/disappears correctly and coexists
+  cleanly with the sign-up form's existing password-rule hint text underneath it.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
