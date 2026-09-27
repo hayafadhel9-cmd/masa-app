@@ -539,8 +539,58 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   automation doesn't reliably toggle the real OS-level Caps Lock modifier for
   `getModifierState` to read), and confirmed it appears/disappears correctly and coexists
   cleanly with the sign-up form's existing password-rule hint text underneath it.
+- **Booking screen no longer asks for name/phone (2026-09-27):** since login is required
+  to complete a booking (see "Real customer accounts" above), asking for a name and phone
+  on every single booking was redundant — that info already lives on the account. The
+  "Your name" and "Mobile number" fields were removed from the Booking screen in
+  `app/page.js` entirely; `confirmBooking()` now derives `guest_name`/`guest_phone` from
+  the signed-in user via two small helpers in the new `lib/guestInfo.js`:
+  `guestNameFromUser(user)` (falls back through `reservation_name` → `full_name` →
+  `"Guest"`) and `guestPhoneFromUser(user)` (always `user.user_metadata.phone`, no
+  override — phone was never meant to differ per-booking). A new **optional "Reservation
+  name"** field was added to the Account tab (customer side only — the restaurant
+  dashboard's own login/settings are untouched) letting a customer set a different name to
+  use on bookings than their account's main name (e.g. a nickname). It's stored as
+  `reservation_name` in the same Supabase Auth `user_metadata` bag as `full_name`/`phone`
+  (no new table), saved via `supabase.auth.updateUser({ data: { reservation_name } })`,
+  and clearing the field back to blank removes the key entirely (`null`) rather than
+  storing an empty string, so the fallback-to-full-name logic triggers correctly. Both
+  new translation strings (`reservationName`, `reservationNameHint`) were added in English
+  and Arabic; the now-unused `yourName` key (only ever used by the removed field) was
+  deleted from both. Tested live end-to-end against the real Supabase project: set a
+  reservation name → booked → confirmed the `bookings` row's `guest_name` was the
+  reservation name, not the account name; cleared the reservation name → booked again →
+  confirmed it fell back to the account's `full_name` correctly; `guest_phone` was the
+  account phone in both cases. Also verified in Arabic — the label, hint text, and RTL
+  text entry into the field all work correctly (one pre-existing, unrelated cosmetic
+  quirk noticed during this pass: the Sign Out button's icon doesn't mirror to the other
+  side of its text in RTL the way the language-toggle button's icon does, even though both
+  use the same `flex items-center gap-2` pattern — not introduced by this change, not
+  investigated further, flagging only in case it's worth a look later). The restaurant
+  dashboard needed no changes at all — it already just renders whatever `guest_name`/
+  `guest_phone` a booking row has, same as before. Live-testing this required a real
+  logged-in customer session; the Resend free-tier sandbox on this project only delivers
+  confirmation emails to the project owner's own address, so a fresh sign-up through the
+  UI couldn't be used for testing. The user created a test account directly via the
+  Supabase dashboard (Authentication → Add user, Auto Confirm) instead — see the new
+  "Resend is still in sandbox mode" bullet under "Known limitations" below, which is a
+  separate, already-existing issue affecting real user sign-ups too, not just testing.
 
 ## Known limitations / deliberate simplifications (not bugs)
+- **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
+  project's confirmation emails go through Resend, and Resend's free/sandbox mode will
+  only actually deliver to the email address that owns the Resend account
+  (`hayafadhel9@gmail.com`) — every other address gets rejected with a 550 error
+  (`"You can only send testing emails to your own email address..."`), which Supabase
+  Auth then surfaces as a 500 `unexpected_failure` on sign-up, and the whole sign-up rolls
+  back with no user row created at all. In practice this means **real customer sign-ups
+  with any email other than the owner's own are currently broken** — they'll never
+  receive a confirmation email and can't complete account creation. Fixing this requires
+  verifying a sending domain at resend.com/domains and pointing Supabase's SMTP "from"
+  address at it; nobody has done this yet. A separate, already-fixed bug
+  (`lib/authErrorMessage.js`) means the user now at least sees a friendly error instead of
+  a literal `"{}"` when this happens, but the underlying delivery restriction is still
+  live and blocking real sign-ups.
 - Card hold step is a plain text input, NOT connected to Stripe or any real payment processor
 - Customer accounts exist now (2026-08-29 — see the bullet above). Email verification is
   now ON at the Supabase project level (the user enabled it after this feature shipped).

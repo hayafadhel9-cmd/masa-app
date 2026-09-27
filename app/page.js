@@ -9,6 +9,7 @@ import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
 import { authErrorMessage } from "../lib/authErrorMessage";
+import { guestNameFromUser, guestPhoneFromUser } from "../lib/guestInfo";
 
 function CustomerAuthForm({
   mode,
@@ -181,8 +182,6 @@ export default function DinerPage() {
   const [occasion, setOccasion] = useState("None");
   const [tab, setTab] = useState("discover");
   const [myBookings, setMyBookings] = useState([]);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [cardNumber, setCardNumber] = useState("");
   const [lastBooking, setLastBooking] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
@@ -206,6 +205,9 @@ export default function DinerPage() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authConfirmationPending, setAuthConfirmationPending] = useState(false);
   const [pendingBookingAfterAuth, setPendingBookingAfterAuth] = useState(false);
+  const [reservationName, setReservationName] = useState("");
+  const [savingReservationName, setSavingReservationName] = useState(false);
+  const [reservationNameSaved, setReservationNameSaved] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user || null));
@@ -214,6 +216,27 @@ export default function DinerPage() {
     });
     return () => sub.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    setReservationName(user?.user_metadata?.reservation_name || "");
+  }, [user]);
+
+  async function handleSaveReservationName() {
+    setSavingReservationName(true);
+    setReservationNameSaved(false);
+    const trimmed = reservationName.trim();
+    const { error } = await supabase.auth.updateUser({
+      data: { reservation_name: trimmed || null },
+    });
+    setSavingReservationName(false);
+    if (error) {
+      console.error("Saving reservation name failed:", error.message);
+      alert(authErrorMessage(error, t));
+      return;
+    }
+    setReservationName(trimmed);
+    setReservationNameSaved(true);
+  }
 
   function resetAuthForm() {
     setAuthEmail("");
@@ -413,8 +436,8 @@ export default function DinerPage() {
       .insert({
         restaurant_id: active.id,
         user_id: bookingUser.id,
-        guest_name: name || "Guest",
-        guest_phone: phone || "N/A",
+        guest_name: guestNameFromUser(bookingUser),
+        guest_phone: guestPhoneFromUser(bookingUser),
         party_size: party,
         zone: zone,
         occasion: occasion === "None" ? null : occasion,
@@ -855,22 +878,6 @@ export default function DinerPage() {
               );
             })}
           </div>
-
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("yourName")}</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={t("fullName")}
-            className="w-full rounded-full px-4 py-3.5 text-sm mt-2 mb-3 outline-none bg-tan text-charcoal placeholder:text-taupe"
-          />
-
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("mobileNumber")}</label>
-          <input
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            placeholder="+971 5X XXX XXXX"
-            className="w-full rounded-full px-4 py-3.5 text-sm mt-2 mb-6 outline-none bg-tan text-charcoal placeholder:text-taupe"
-          />
 
           <button
             onClick={() => setScreen("zone")}
@@ -1349,6 +1356,36 @@ export default function DinerPage() {
                 <div className="text-xs text-muted">{user.email}</div>
                 {user.user_metadata?.phone && (
                   <div className="text-xs text-muted mt-0.5">{user.user_metadata.phone}</div>
+                )}
+              </div>
+              <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
+                  {t("reservationName")}
+                </label>
+                <p className="text-xs text-muted mt-1 mb-2.5">{t("reservationNameHint")}</p>
+                <input
+                  value={reservationName}
+                  onChange={(e) => {
+                    setReservationName(e.target.value);
+                    setReservationNameSaved(false);
+                  }}
+                  placeholder={user.user_metadata?.full_name || ""}
+                  className="w-full rounded-full px-4 py-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                />
+                <button
+                  onClick={handleSaveReservationName}
+                  disabled={
+                    savingReservationName ||
+                    reservationName.trim() === (user.user_metadata?.reservation_name || "").trim()
+                  }
+                  className="w-full rounded-full py-3 mt-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+                >
+                  {savingReservationName ? t("saving") : t("saveChanges")}
+                </button>
+                {reservationNameSaved && (
+                  <p className="text-xs text-burgundy mt-2 flex items-center gap-1">
+                    <Check size={12} /> {t("saved")}
+                  </p>
                 )}
               </div>
               <button
