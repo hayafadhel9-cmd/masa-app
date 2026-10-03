@@ -208,6 +208,9 @@ export default function DinerPage() {
   const [reservationName, setReservationName] = useState("");
   const [savingReservationName, setSavingReservationName] = useState(false);
   const [reservationNameSaved, setReservationNameSaved] = useState(false);
+  const [accountPhone, setAccountPhone] = useState("");
+  const [savingAccountPhone, setSavingAccountPhone] = useState(false);
+  const [accountPhoneSaved, setAccountPhoneSaved] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user || null));
@@ -219,6 +222,7 @@ export default function DinerPage() {
 
   useEffect(() => {
     setReservationName(user?.user_metadata?.reservation_name || "");
+    setAccountPhone(user?.user_metadata?.phone || "");
   }, [user]);
 
   async function handleSaveReservationName() {
@@ -236,6 +240,23 @@ export default function DinerPage() {
     }
     setReservationName(trimmed);
     setReservationNameSaved(true);
+  }
+
+  async function handleSaveAccountPhone() {
+    setSavingAccountPhone(true);
+    setAccountPhoneSaved(false);
+    const trimmed = accountPhone.trim();
+    const { error } = await supabase.auth.updateUser({
+      data: { phone: trimmed },
+    });
+    setSavingAccountPhone(false);
+    if (error) {
+      console.error("Saving account phone failed:", error.message);
+      alert(authErrorMessage(error, t));
+      return;
+    }
+    setAccountPhone(trimmed);
+    setAccountPhoneSaved(true);
   }
 
   function resetAuthForm() {
@@ -1362,7 +1383,6 @@ export default function DinerPage() {
                 <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
                   {t("reservationName")}
                 </label>
-                <p className="text-xs text-muted mt-1 mb-2.5">{t("reservationNameHint")}</p>
                 <input
                   value={reservationName}
                   onChange={(e) => {
@@ -1370,7 +1390,7 @@ export default function DinerPage() {
                     setReservationNameSaved(false);
                   }}
                   placeholder={user.user_metadata?.full_name || ""}
-                  className="w-full rounded-full px-4 py-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                  className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe"
                 />
                 <button
                   onClick={handleSaveReservationName}
@@ -1383,6 +1403,36 @@ export default function DinerPage() {
                   {savingReservationName ? t("saving") : t("saveChanges")}
                 </button>
                 {reservationNameSaved && (
+                  <p className="text-xs text-burgundy mt-2 flex items-center gap-1">
+                    <Check size={12} /> {t("saved")}
+                  </p>
+                )}
+              </div>
+              <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
+                  {t("mobileNumber")}
+                </label>
+                <input
+                  value={accountPhone}
+                  onChange={(e) => {
+                    setAccountPhone(e.target.value);
+                    setAccountPhoneSaved(false);
+                  }}
+                  placeholder="+971 5X XXX XXXX"
+                  className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe"
+                />
+                <button
+                  onClick={handleSaveAccountPhone}
+                  disabled={
+                    savingAccountPhone ||
+                    !accountPhone.trim() ||
+                    accountPhone.trim() === (user.user_metadata?.phone || "").trim()
+                  }
+                  className="w-full rounded-full py-3 mt-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+                >
+                  {savingAccountPhone ? t("saving") : t("saveChanges")}
+                </button>
+                {accountPhoneSaved && (
                   <p className="text-xs text-burgundy mt-2 flex items-center gap-1">
                     <Check size={12} /> {t("saved")}
                   </p>
