@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Globe, Clock, User, LogOut, MailCheck, Eye, EyeOff } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
@@ -206,11 +206,11 @@ export default function DinerPage() {
   const [authConfirmationPending, setAuthConfirmationPending] = useState(false);
   const [pendingBookingAfterAuth, setPendingBookingAfterAuth] = useState(false);
   const [reservationName, setReservationName] = useState("");
-  const [savingReservationName, setSavingReservationName] = useState(false);
-  const [reservationNameSaved, setReservationNameSaved] = useState(false);
   const [accountPhone, setAccountPhone] = useState("");
-  const [savingAccountPhone, setSavingAccountPhone] = useState(false);
-  const [accountPhoneSaved, setAccountPhoneSaved] = useState(false);
+  const [accountFullName, setAccountFullName] = useState("");
+  const [savingAccountInfo, setSavingAccountInfo] = useState(false);
+  const [accountInfoSaved, setAccountInfoSaved] = useState(false);
+  const [accountView, setAccountView] = useState("main"); // "main" | "info" | "payment"
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user || null));
@@ -223,40 +223,32 @@ export default function DinerPage() {
   useEffect(() => {
     setReservationName(user?.user_metadata?.reservation_name || "");
     setAccountPhone(user?.user_metadata?.phone || "");
+    setAccountFullName(user?.user_metadata?.full_name || "");
   }, [user]);
 
-  async function handleSaveReservationName() {
-    setSavingReservationName(true);
-    setReservationNameSaved(false);
-    const trimmed = reservationName.trim();
+  async function handleSaveAccountInfo() {
+    setSavingAccountInfo(true);
+    setAccountInfoSaved(false);
+    const trimmedName = accountFullName.trim();
+    const trimmedReservation = reservationName.trim();
+    const trimmedPhone = accountPhone.trim();
     const { error } = await supabase.auth.updateUser({
-      data: { reservation_name: trimmed || null },
+      data: {
+        full_name: trimmedName || null,
+        reservation_name: trimmedReservation || null,
+        phone: trimmedPhone || null,
+      },
     });
-    setSavingReservationName(false);
+    setSavingAccountInfo(false);
     if (error) {
-      console.error("Saving reservation name failed:", error.message);
+      console.error("Saving account info failed:", error.message);
       alert(authErrorMessage(error, t));
       return;
     }
-    setReservationName(trimmed);
-    setReservationNameSaved(true);
-  }
-
-  async function handleSaveAccountPhone() {
-    setSavingAccountPhone(true);
-    setAccountPhoneSaved(false);
-    const trimmed = accountPhone.trim();
-    const { error } = await supabase.auth.updateUser({
-      data: { phone: trimmed },
-    });
-    setSavingAccountPhone(false);
-    if (error) {
-      console.error("Saving account phone failed:", error.message);
-      alert(authErrorMessage(error, t));
-      return;
-    }
-    setAccountPhone(trimmed);
-    setAccountPhoneSaved(true);
+    setAccountFullName(trimmedName);
+    setReservationName(trimmedReservation);
+    setAccountPhone(trimmedPhone);
+    setAccountInfoSaved(true);
   }
 
   function resetAuthForm() {
@@ -320,6 +312,7 @@ export default function DinerPage() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setUser(null);
+    setAccountView("main");
     setTab("discover");
     setScreen("home");
   }
@@ -667,6 +660,9 @@ export default function DinerPage() {
   const visibleBookings = bookingsView === "current" ? currentBookings : pastBookings;
 
   const trackingTimeAvailability = Object.keys(timeAvailability).length > 0;
+
+  const accountDisplayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || t("guest");
+  const accountAvatarInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <div className="mx-auto max-w-md min-h-screen bg-cream px-5 pb-28 relative flex flex-col">
@@ -1354,9 +1350,9 @@ export default function DinerPage() {
 
       {tab === "account" && (
         <div className="pt-6 flex-1 flex flex-col">
-          <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("account")}</h2>
           {!user ? (
             <>
+              <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("account")}</h2>
               <p className="text-sm text-muted mb-6">{t("accountLoginPrompt")}</p>
               <CustomerAuthForm
                 mode={authMode}
@@ -1376,16 +1372,28 @@ export default function DinerPage() {
                 t={t}
               />
             </>
-          ) : (
+          ) : accountView === "info" ? (
             <>
+              <button
+                onClick={() => setAccountView("main")}
+                className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium"
+              >
+                <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+              </button>
+              <h2 className="font-serif text-2xl mb-5 mt-2 text-charcoal">{t("accountInfo")}</h2>
+
               <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
-                <div className="font-serif text-lg text-charcoal mb-1">
-                  {user.user_metadata?.full_name || t("guest")}
-                </div>
-                <div className="text-xs text-muted">{user.email}</div>
-                {user.user_metadata?.phone && (
-                  <div className="text-xs text-muted mt-0.5">{user.user_metadata.phone}</div>
-                )}
+                <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
+                  {t("fullName")}
+                </label>
+                <input
+                  value={accountFullName}
+                  onChange={(e) => {
+                    setAccountFullName(e.target.value);
+                    setAccountInfoSaved(false);
+                  }}
+                  className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe"
+                />
               </div>
               <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
@@ -1395,26 +1403,11 @@ export default function DinerPage() {
                   value={reservationName}
                   onChange={(e) => {
                     setReservationName(e.target.value);
-                    setReservationNameSaved(false);
+                    setAccountInfoSaved(false);
                   }}
-                  placeholder={user.user_metadata?.full_name || ""}
+                  placeholder={accountFullName}
                   className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe"
                 />
-                <button
-                  onClick={handleSaveReservationName}
-                  disabled={
-                    savingReservationName ||
-                    reservationName.trim() === (user.user_metadata?.reservation_name || "").trim()
-                  }
-                  className="w-full rounded-full py-3 mt-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
-                >
-                  {savingReservationName ? t("saving") : t("saveChanges")}
-                </button>
-                {reservationNameSaved && (
-                  <p className="text-xs text-burgundy mt-2 flex items-center gap-1">
-                    <Check size={12} /> {t("saved")}
-                  </p>
-                )}
               </div>
               <div className="rounded-[20px] p-4 mb-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
                 <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
@@ -1424,39 +1417,97 @@ export default function DinerPage() {
                   value={accountPhone}
                   onChange={(e) => {
                     setAccountPhone(e.target.value);
-                    setAccountPhoneSaved(false);
+                    setAccountInfoSaved(false);
                   }}
                   placeholder="+971 5X XXX XXXX"
                   className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe"
                 />
-                <button
-                  onClick={handleSaveAccountPhone}
-                  disabled={
-                    savingAccountPhone ||
-                    !accountPhone.trim() ||
-                    accountPhone.trim() === (user.user_metadata?.phone || "").trim()
-                  }
-                  className="w-full rounded-full py-3 mt-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
-                >
-                  {savingAccountPhone ? t("saving") : t("saveChanges")}
-                </button>
-                {accountPhoneSaved && (
-                  <p className="text-xs text-burgundy mt-2 flex items-center gap-1">
-                    <Check size={12} /> {t("saved")}
-                  </p>
-                )}
               </div>
+              <div className="rounded-[20px] p-4 mb-5 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
+                <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
+                  {t("email")}
+                </label>
+                <div className="text-sm text-charcoal mt-2">{user.email}</div>
+              </div>
+
               <button
-                onClick={() => setLang(lang === "en" ? "ar" : "en")}
-                className="flex items-center gap-2 rounded-full px-4 py-3 mb-3 bg-card text-charcoal text-sm font-medium"
+                onClick={handleSaveAccountInfo}
+                disabled={
+                  savingAccountInfo ||
+                  (accountFullName.trim() === (user.user_metadata?.full_name || "").trim() &&
+                    reservationName.trim() === (user.user_metadata?.reservation_name || "").trim() &&
+                    accountPhone.trim() === (user.user_metadata?.phone || "").trim())
+                }
+                className="w-full rounded-full py-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60 text-center"
               >
-                <Globe size={16} /> {lang === "en" ? "عربي" : "English"}
+                {savingAccountInfo ? t("saving") : t("saveChanges")}
               </button>
+              {accountInfoSaved && (
+                <p className="text-xs text-burgundy mt-2 flex items-center justify-center gap-1">
+                  <Check size={12} /> {t("saved")}
+                </p>
+              )}
+            </>
+          ) : accountView === "payment" ? (
+            <>
+              <button
+                onClick={() => setAccountView("main")}
+                className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium"
+              >
+                <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+              </button>
+              <h2 className="font-serif text-2xl mb-5 mt-2 text-charcoal">{t("paymentMethods")}</h2>
+              <div className="rounded-[20px] p-6 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)] text-center">
+                <p className="font-serif text-lg text-charcoal mb-2">{t("comingSoon")}</p>
+                <p className="text-sm text-muted">{t("paymentMethodsComingSoonBody")}</p>
+              </div>
+            </>
+          ) : (
+            <>
+              <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("account")}</h2>
+
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-14 h-14 rounded-full bg-burgundy text-offwhite flex items-center justify-center font-serif text-xl flex-shrink-0">
+                  {accountAvatarInitial}
+                </div>
+                <div>
+                  <div className="font-serif text-lg text-charcoal">{accountDisplayName}</div>
+                  <div className="text-xs text-muted">{user.email}</div>
+                </div>
+              </div>
+
+              <div className="rounded-[20px] bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)] mb-4 divide-y divide-charcoal/[0.06] overflow-hidden">
+                <button
+                  onClick={() => setAccountView("info")}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-medium text-charcoal"
+                >
+                  <span>{t("accountInfo")}</span>
+                  <ChevronRight size={16} className="text-taupe rtl:rotate-180" />
+                </button>
+                <button
+                  onClick={() => setAccountView("payment")}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-medium text-charcoal"
+                >
+                  <span>{t("paymentMethods")}</span>
+                  <ChevronRight size={16} className="text-taupe rtl:rotate-180" />
+                </button>
+                <button
+                  onClick={() => setLang(lang === "en" ? "ar" : "en")}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-medium text-charcoal"
+                >
+                  <span>{t("language")}</span>
+                  <span className="flex items-center gap-1.5 text-taupe">
+                    {lang === "en" ? "عربي" : "English"}
+                    <ChevronRight size={16} className="rtl:rotate-180" />
+                  </span>
+                </button>
+              </div>
+
               <button
                 onClick={handleSignOut}
-                className="flex items-center gap-2 rounded-full px-4 py-3 bg-card text-warn text-sm font-medium"
+                className="w-full rounded-full px-4 py-3 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)] text-warn text-sm font-medium text-center"
               >
-                <LogOut size={16} /> {t("signOutCustomer")}
+                {t("signOutCustomer")}
               </button>
             </>
           )}

@@ -650,6 +650,58 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   class to `<html>` and rewrites visible text nodes, leaving the app's own `dir`/state
   untouched) — if a future session's screenshots show English text on a page that should be
   Arabic, check for that class before assuming the app's language switch broke.
+- **Account tab restructured into a Talabat-style profile pattern (2026-10-04):** the
+  previously fully-inline Account tab (profile card + every editable field always visible)
+  in `app/page.js` is now three views behind a local `accountView` state
+  (`"main" | "info" | "payment"`, reset to `"main"` on sign-out):
+  - **Main screen:** a profile header (circular burgundy avatar showing the first letter of
+    the display name, full name, email underneath) followed by a grouped card of full-width
+    tappable rows — "Account info" and "Payment methods" (both chevron-ended, navigate into
+    their own view) and "Language" (shows the *other* language as a label on the trailing
+    side, e.g. "عربي" while in English — tapping it calls the same `setLang` toggle that
+    used to live inline here, just relocated). "Sign out" is a separate full-width row below
+    the group, with centered text (not the row list's left-aligned/chevron style).
+  - **Account info sub-page:** back button, then all four fields together — Full name
+    (newly editable; previously set only at signup and never editable after), Reservation
+    name, Mobile number (both pre-existing editable fields, now moved here), and Email
+    (**read-only display, not an input** — a deliberate choice confirmed with the user,
+    since a real editable-email flow needs Supabase's email-change confirmation email,
+    which Resend's sandbox mode can't currently deliver to non-owner addresses anyway; see
+    the Resend bullet below) — with one single "Save changes" button at the bottom
+    (centered text) that writes all three editable fields in one
+    `supabase.auth.updateUser({ data: {...} })` call, replacing the old one-button-per-field
+    pattern. "Payment methods" is a simple back-button + "Coming soon" card — intentionally
+    not real card storage, which needs a separate Stripe integration project.
+  - **Three bug fixes bundled into this same pass:**
+    1. The account header used to show the literal word "Guest" for any real logged-in user
+       whose `user_metadata.full_name` wasn't set (e.g. a QA account created directly via
+       the Supabase dashboard rather than through the real sign-up form). Now it falls back
+       to the email's local part (e.g. `heldtest1` for `heldtest1@gmail.com`) before ever
+       falling back to "Guest" — a real logged-in user essentially always has *some*
+       sensible name to show. This is computed once as `accountDisplayName` (and
+       `accountAvatarInitial` from its first character) near the component's render return,
+       reused by both the avatar and the header text.
+    2. The Mobile Number field now genuinely pre-fills from `user_metadata.phone` — this
+       logic already existed (a `useEffect` keyed on `[user]`) but is confirmed working
+       correctly in this pass; it was extended to also pre-fill the new Full Name field from
+       `user_metadata.full_name`.
+    3. The Save button's dusty-mauve look was never actually a wrong color — it's
+       `bg-burgundy` with Tailwind's `disabled:opacity-60` applied while the button is
+       legitimately disabled (no unsaved changes), which washes the deep burgundy out to a
+       muted mauve-ish tone. Confirmed live: typing into any field immediately shows the
+       button at full-opacity real burgundy. No color value needed to change; this is noted
+       here so a future session doesn't "fix" something that was already correct.
+  - **Tested live end-to-end** (local dev server, same production Supabase project) using
+    the "Held Test Account" QA account: logged in with a freshly-emptied metadata state
+    (confirming the email-fallback display-name fix), filled and saved all three editable
+    fields via the new combined Save button, reloaded the page fresh and confirmed all four
+    Account info fields correctly pre-filled from the saved data, confirmed the main
+    screen's header picked up the new name, exercised the Payment methods placeholder,
+    toggled Language from its new row (confirmed the whole screen re-renders RTL-mirrored
+    correctly, including chevron direction via the existing `rtl:rotate-180` convention),
+    and confirmed Sign out returns to a correctly-RTL-rendered logged-out prompt. Verified
+    in genuine (pre-auto-translate) Arabic — see the edge-fade bullet above for why that
+    matters when capturing screenshots of this app in Arabic.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
