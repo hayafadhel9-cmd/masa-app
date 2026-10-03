@@ -628,6 +628,28 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   stale cached JS bundle on that specific device, or a transient Supabase/network blip are
   the most likely remaining explanations for a bug that wouldn't reproduce in a clean
   environment.
+- **Edge-fade effect on the Booking screen's date strip (2026-10-04):** the horizontally-
+  scrollable date strip (see the 2026-08-26 bullet above) now fades days near the left and
+  right edges of its visible container and un-fades them smoothly as they scroll toward the
+  center — a purely visual polish, no logic change. Implemented as a CSS `mask-image` (plus
+  `-webkit-mask-image` for Safari) linear gradient — `transparent → black 32px → black
+  calc(100% - 32px) → transparent` — applied inline on the scrollable container in
+  `app/page.js`, directly alongside its existing `overflow-x-auto` classes. Because the
+  gradient fades the container's physical left/right edges symmetrically, it needed no
+  RTL-specific handling: the same style works unchanged in both directions. The real
+  `generateDateStrip(minAdvanceDays, maxAdvanceDays, locale)` date-range/availability logic
+  is completely untouched. **Tested live:** against a restaurant with a 16-day bookable
+  window (`min_advance_days=0`, `max_advance_days=15`), confirmed both edges visibly fade
+  at rest and scrolling the strip moves the fade with it (newly-revealed days enter faded
+  and sharpen toward the center; days leaving the opposite edge fade out), in both English
+  and Arabic/RTL — confirmed in genuine (pre-auto-translate) Arabic that the date order and
+  fade both mirror correctly (newest-visible date at the trailing edge, same symmetric
+  fade). **Unrelated observation made during this test, not a code issue:** Chrome's
+  built-in page translator can silently auto-translate this app's Arabic UI to English in
+  the background after a few seconds on a page (it adds a `translated-ltr`/`translated-rtl`
+  class to `<html>` and rewrites visible text nodes, leaving the app's own `dir`/state
+  untouched) — if a future session's screenshots show English text on a page that should be
+  Arabic, check for that class before assuming the app's language switch broke.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the

@@ -795,7 +795,15 @@ export default function DinerPage() {
           <div className="w-8 h-0.5 bg-brass my-3.5" />
 
           <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("date")}</label>
-          <div className="flex gap-2.5 overflow-x-auto mt-2 mb-5 pb-1">
+          <div
+            className="flex gap-2.5 overflow-x-auto mt-2 mb-5 pb-1"
+            style={{
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent)",
+              maskImage:
+                "linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent)",
+            }}
+          >
             {generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US").map(
               (d) => {
                 const selected = bookingDate === d.value;
