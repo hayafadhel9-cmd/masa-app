@@ -575,6 +575,59 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   Supabase dashboard (Authentication → Add user, Auto Confirm) instead — see the new
   "Resend is still in sandbox mode" bullet under "Known limitations" below, which is a
   separate, already-existing issue affecting real user sign-ups too, not just testing.
+- **Forgot password for the restaurant dashboard login (2026-10-04):** restaurant owners
+  previously had no self-service way back in if they forgot their password.
+  `app/dashboard/login/page.js` now has a "Forgot password?" link (login mode only) that
+  switches to a small inline form (email only) and calls
+  `supabase.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/dashboard/reset-password` })`;
+  a generic "Check your email" confirmation shows regardless of whether the account
+  exists (`resetLinkSentBody` key), matching Supabase's own no-enumeration behavior. A new
+  page, `app/dashboard/reset-password/page.js` (wrapped in `<Suspense>` for
+  `useSearchParams`, same pattern as `settings/page.js`), establishes the recovery session
+  from the emailed link — handles both the PKCE `?code=` param
+  (`exchangeCodeForSession`) and the older hash-fragment flow (via an `onAuthStateChange`
+  `PASSWORD_RECOVERY` listener as a fallback) — then lets the owner set a new password
+  (reusing `passwordRuleMessage`/`PASSWORD_MIN_LENGTH` from `lib/passwordRules.js`, with
+  the same show/hide + Caps Lock affordances as every other password field in the app) and
+  redirects to `/dashboard` on success. `middleware.js` exempts `/dashboard/reset-password`
+  from the auth gate the same way `/dashboard/login` already is, since the page must load
+  before a session exists.
+  **Tested live end-to-end against the real production deployment**
+  (`https://masa-app-1e96.vercel.app`), not just locally: triggered a reset for the real
+  owner account (`hayafadhel9@gmail.com`), confirmed the emailed link's `redirect_to`
+  correctly pointed at the production `/dashboard/reset-password` URL, and the user
+  clicked it directly from their own inbox, reached the set-new-password form, set a new
+  password, and logged in successfully with it.
+  **Known gotcha, not a bug in this app:** Supabase recovery links are single-use. If a
+  link passes through an email click-tracking/scanning layer before the real user clicks
+  it, that hop can consume the one-time token first, surfacing as `otp_expired` /
+  "Email link is invalid or has expired" on a legitimate, never-yet-clicked link. Observed
+  during testing: a reset link relayed through an extra hop (pasted into chat, which
+  revealed it was wrapped by Resend's AWS SES-backed click-tracking domain,
+  `*.awstrack.me`) failed with this error, while the same flow worked immediately when the
+  user opened a fresh email and clicked straight from their inbox. Nothing to fix in this
+  app's code — worth knowing if a restaurant owner reports a reset link not working: have
+  them request a fresh one and click it directly from their mail client rather than
+  forwarding/pasting it elsewhere first.
+- **Investigated, not reproduced (2026-10-04): report of `/dashboard/login` redirecting a
+  restaurant owner to the customer-facing app instead of the dashboard.** The user
+  reported that logging in as the restaurant owner (`hayafadhel9@gmail.com`) redirected to
+  `/` instead of showing the dashboard, even right after a password reset. Investigated the
+  likely mechanism — `middleware.js`'s `requiresExistingRestaurant` check redirects to `/`
+  if the logged-in user owns no row in `restaurants` — but found no ambiguity to explain
+  it: exactly one `auth.users` row exists for that email, exactly one `restaurants` row has
+  a matching `owner_id`, and the `restaurants` SELECT policy is `using (true)` so the
+  ownership query doesn't depend on `auth.uid()` resolving correctly. Reproduced the full
+  login flow live, with a fresh browser session and a temporary admin-set password, against
+  both the local dev server (same production Supabase project) and the real production URL
+  (`https://masa-app-1e96.vercel.app`) — both times login correctly reached `/dashboard`
+  and showed the owned restaurant, no redirect to `/`. No code change was made since
+  nothing reproducible was found; ruled out a stale service worker/PWA cache (this app has
+  neither). **If this recurs**, capture the exact browser/device, whether it's a normal or
+  incognito window, and any active browser extensions — a cookie-blocking extension, a
+  stale cached JS bundle on that specific device, or a transient Supabase/network blip are
+  the most likely remaining explanations for a bug that wouldn't reproduce in a clean
+  environment.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
