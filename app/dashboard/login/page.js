@@ -12,7 +12,7 @@ import { authErrorMessage } from "../../../lib/authErrorMessage";
 export default function DashboardLoginPage() {
   const router = useRouter();
   const { lang, setLang, t } = useLanguage();
-  const [mode, setMode] = useState("login"); // "login" | "signup"
+  const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -20,6 +20,7 @@ export default function DashboardLoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmationPending, setConfirmationPending] = useState(false);
+  const [resetLinkSent, setResetLinkSent] = useState(false);
 
   async function handleLogin(e) {
     e.preventDefault();
@@ -64,12 +65,103 @@ export default function DashboardLoginPage() {
     router.push("/dashboard/settings?onboarding=true");
   }
 
+  async function handleForgotPassword(e) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/dashboard/reset-password`,
+    });
+    setLoading(false);
+    if (error) {
+      setError(authErrorMessage(error, t));
+      return;
+    }
+    setResetLinkSent(true);
+  }
+
   if (confirmationPending) {
     return (
       <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16 text-center">
         <MailCheck size={32} className="text-teal mx-auto mb-4" />
         <h1 className="font-serif text-xl text-ink mb-2">{t("confirmEmailTitle")}</h1>
         <p className="text-sm text-neutral-500">{t("confirmEmailBody", { email })}</p>
+      </div>
+    );
+  }
+
+  if (resetLinkSent) {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16 text-center">
+        <MailCheck size={32} className="text-teal mx-auto mb-4" />
+        <h1 className="font-serif text-xl text-ink mb-2">{t("resetLinkSentTitle")}</h1>
+        <p className="text-sm text-neutral-500 mb-6">{t("resetLinkSentBody", { email })}</p>
+        <button
+          onClick={() => {
+            setResetLinkSent(false);
+            setMode("login");
+          }}
+          className="text-xs text-neutral-500 underline"
+        >
+          {t("backToSignIn")}
+        </button>
+      </div>
+    );
+  }
+
+  if (mode === "forgot") {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <LayoutDashboard size={20} className="text-teal" />
+            <h1 className="font-serif text-2xl text-ink">{t("resetPasswordTitle")}</h1>
+          </div>
+          <button
+            onClick={() => setLang(lang === "en" ? "ar" : "en")}
+            className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
+          >
+            <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
+          </button>
+        </div>
+        <p className="text-sm text-neutral-500 mb-6">{t("forgotPasswordSubtitle")}</p>
+
+        <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+          <div>
+            <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("email")}</label>
+            <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
+              <Mail size={15} className="text-neutral-400" />
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@restaurant.com"
+                className="flex-1 bg-transparent outline-none text-sm"
+                required
+              />
+            </div>
+          </div>
+
+          {error && <p className="text-xs text-red-600">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory disabled:opacity-60"
+          >
+            {loading ? t("pleaseWait") : t("sendResetLink")}
+          </button>
+        </form>
+
+        <button
+          onClick={() => {
+            setMode("login");
+            setError("");
+          }}
+          className="w-full text-center text-xs mt-5 text-neutral-500 underline"
+        >
+          {t("backToSignIn")}
+        </button>
       </div>
     );
   }
@@ -139,6 +231,18 @@ export default function DashboardLoginPage() {
           )}
           {mode === "signup" && (
             <p className="text-[11px] text-neutral-400 mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
+          )}
+          {mode === "login" && (
+            <button
+              type="button"
+              onClick={() => {
+                setMode("forgot");
+                setError("");
+              }}
+              className="text-[11px] text-neutral-500 underline mt-1.5"
+            >
+              {t("forgotPassword")}
+            </button>
           )}
         </div>
 

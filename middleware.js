@@ -33,7 +33,13 @@ export async function middleware(request) {
   } = await supabase.auth.getUser();
 
   const { pathname } = request.nextUrl;
-  const isDashboardRoute = pathname.startsWith("/dashboard") && pathname !== "/dashboard/login";
+  // /dashboard/reset-password must load before a session exists (the page
+  // itself establishes one client-side from the emailed recovery link), so
+  // it's exempt from the auth gate the same way /dashboard/login is.
+  const isDashboardRoute =
+    pathname.startsWith("/dashboard") &&
+    pathname !== "/dashboard/login" &&
+    pathname !== "/dashboard/reset-password";
   // Settings is also where a brand-new owner completes onboarding (creates
   // their first restaurant row), so it can't require pre-existing ownership
   // the way the rest of the dashboard can.
