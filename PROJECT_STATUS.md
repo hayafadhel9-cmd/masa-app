@@ -702,6 +702,66 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     and confirmed Sign out returns to a correctly-RTL-rendered logged-out prompt. Verified
     in genuine (pre-auto-translate) Arabic — see the edge-fade bullet above for why that
     matters when capturing screenshots of this app in Arabic.
+- **Post-dining ratings (2026-10-04):** customers can now rate a restaurant after a booking
+  is marked "dined," and the average shows on the restaurant page as a partially-filled
+  star.
+  - **New `reviews` table** (`booking_id`, `restaurant_id`, `user_id`, `rating` 1-5,
+    `comment`, `created_at`), added via migration and mirrored in `schema.sql`. A `unique
+    (booking_id)` constraint enforces one review per booking at the DB level, as defense in
+    depth alongside RLS. **RLS:** SELECT is public (`using (true)`) so the average can show
+    without a login; INSERT requires `auth.uid() = user_id` *and* an `exists` check that the
+    referenced booking belongs to that same user, has `status = 'dined'`, and its
+    `restaurant_id` matches the review's — the same ownership-plus-value-check pattern used
+    to close the original bookings self-approval exploit (see the 2026-08-29 security
+    bullet). **No UPDATE or DELETE policy exists at all**, so RLS denies both outright —
+    nobody can edit or delete any review, their own or anyone else's.
+  - **Rating prompt:** `app/page.js` checks once per login (a `useEffect` keyed on `[user]`)
+    for a dined booking with no review and not already dismissed, and surfaces it as a
+    `RatingPromptModal` (restaurant name, booking date/party size, 5 tappable stars, optional
+    comment, Submit, "Not now"). "Not now" and a successful submit both record the booking
+    id in a `localStorage` set (`masa_rating_dismissed_ids`) so the auto-prompt shows at most
+    once per dined booking — a deliberate choice over a DB column, since it's a low-stakes
+    per-device nicety, not something that needs to survive a device switch (the actual
+    review itself, once submitted, obviously does — it's in the DB).
+  - **Rate later from My Bookings:** a dined booking with no review shows a "Rate your
+    visit" button in the Past tab (hidden once reviewed); tapping it opens the same modal,
+    pre-filled for that booking, bypassing the dismissed-set check since it's an explicit
+    user action.
+  - **Aggregate star on the restaurant page:** `RatingStar` (a reusable component) renders a
+    single SVG star with a **hard clip-path**, not a gradient — a `<clipPath>` `<rect>` with
+    a percentage width — filling gold (`#C9A24B`) from the left up to `average / 5` and
+    tan (`#D6CBB2`) the rest of the way, with brand gold/tan as plain color literals, not
+    Tailwind tokens (nothing new needed in `tailwind.config.js`). `openRestaurant()` fetches
+    `reviews.rating` for the restaurant and computes the average client-side; if there are
+    zero reviews, nothing renders in that spot (no "0.0", no empty star). **RTL:** the
+    star+number cluster is wrapped with `direction: ltr` on an *inner* span only (not the
+    outer positioning div) — forcing `ltr` keeps the star-before-number order and the fill
+    direction from mirroring under the page's `dir="rtl"` (CSS `flex-direction: row` is
+    direction-aware and would otherwise visually reverse to "number, star"), while leaving
+    the outer div direction-unset so the whole badge still right-aligns under the restaurant
+    name instead of drifting to the page's left edge. (The clip-path's own percentage width
+    was never at risk of mirroring either way — `clip-path: inset()`/SVG geometry use
+    physical, not logical, coordinates.)
+  - **Tested live end-to-end** against the real production Supabase project (local dev
+    server): created real bookings through the actual booking flow, marked them "Dined"
+    from the real restaurant dashboard (twice, to verify the real flow — remaining dined
+    bookings needed for the fill-percentage tests were inserted directly via SQL once that
+    mechanism was already confirmed), and verified: the prompt auto-appears for a dined,
+    unreviewed booking and not again after submitting; "Not now" suppresses the auto-prompt
+    but leaves "Rate your visit" available in My Bookings → Past; submitting from either
+    path writes a real row and updates the restaurant page. Verified the star fill at
+    5.0 (100%, whole star gold), 3.5 (70%), and 2.5 (50%) by adding ratings that average to
+    each value in turn (zoomed screenshots confirmed the hard edge at the right proportion
+    each time), and confirmed a restaurant with zero reviews shows nothing. **Security:**
+    re-tested the self-approval-exploit pattern specifically for this new table, using a raw
+    authenticated `fetch()` call (not the UI) from the browser console — confirmed blocked
+    with `403`/`42501` (RLS policy violation) both for a review referencing a booking owned
+    by a different customer account and for a review on the reviewer's own booking that
+    wasn't yet "dined," and confirmed a duplicate review on an already-reviewed booking is
+    blocked with `409`/`23505` (unique constraint) even if RLS were somehow bypassed. All
+    test bookings and reviews created during this pass were deleted afterward; the 3
+    pre-existing unrelated bookings in the table (from before this session) were left
+    untouched.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
@@ -10,6 +10,120 @@ import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
 import { authErrorMessage } from "../lib/authErrorMessage";
 import { guestNameFromUser, guestPhoneFromUser } from "../lib/guestInfo";
+
+const RATING_GOLD = "#C9A24B";
+const RATING_TAN = "#D6CBB2";
+const RATING_DISMISSED_KEY = "masa_rating_dismissed_ids";
+
+function getDismissedRatingIds() {
+  if (typeof window === "undefined") return [];
+  try {
+    return JSON.parse(window.localStorage.getItem(RATING_DISMISSED_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function dismissRatingPromptId(bookingId) {
+  const current = getDismissedRatingIds();
+  if (!current.includes(bookingId)) {
+    window.localStorage.setItem(RATING_DISMISSED_KEY, JSON.stringify([...current, bookingId]));
+  }
+}
+
+// A single star, filled gold from the left up to `average / 5` and tan the
+// rest of the way, with a hard (not gradient) edge via an SVG clip-path. The
+// clip rect uses plain numeric/percentage SVG coordinates, not CSS logical
+// properties, so the fill direction stays physically left-to-right
+// regardless of the page's `dir` — this is what keeps it unmirrored in RTL.
+function RatingStar({ average, size = 14 }) {
+  const clipId = `rating-star-${useId()}`;
+  const fillPercent = Math.max(0, Math.min(100, (average / 5) * 100));
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" className="flex-shrink-0">
+      <defs>
+        <clipPath id={clipId}>
+          <rect x="0" y="0" width={`${fillPercent}%`} height="24" />
+        </clipPath>
+      </defs>
+      <path
+        d="M12 2.5l2.9 6.3 6.8.7-5.1 4.6 1.5 6.7-6.1-3.5-6.1 3.5 1.5-6.7-5.1-4.6 6.8-.7z"
+        fill={RATING_TAN}
+      />
+      <path
+        d="M12 2.5l2.9 6.3 6.8.7-5.1 4.6 1.5 6.7-6.1-3.5-6.1 3.5 1.5-6.7-5.1-4.6 6.8-.7z"
+        fill={RATING_GOLD}
+        clipPath={`url(#${clipId})`}
+      />
+    </svg>
+  );
+}
+
+// Tappable 1-5 star row used both in the rating prompt and reused inline for
+// read-only display (via `readOnly`) of a rating the customer already gave.
+function StarPicker({ value, onChange, readOnly, size = 28 }) {
+  return (
+    <div className="flex items-center gap-1.5" style={{ direction: "ltr" }}>
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={readOnly}
+          onClick={() => onChange?.(n)}
+          className={readOnly ? "cursor-default" : ""}
+          aria-label={`${n}`}
+        >
+          <Star size={size} fill={n <= value ? RATING_GOLD : RATING_TAN} stroke="none" />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RatingPromptModal({ booking, value, setValue, comment, setComment, submitting, submitted, onSubmit, onDismiss, t }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-charcoal/50 flex items-center justify-center px-5">
+      <div className="w-full max-w-sm rounded-[20px] p-5 bg-cream shadow-[0_8px_30px_rgba(43,31,33,0.25)]">
+        {submitted ? (
+          <div className="py-6 text-center">
+            <Check size={28} className="text-burgundy mx-auto mb-3" />
+            <p className="text-sm font-medium text-charcoal">{t("thanksForRating")}</p>
+          </div>
+        ) : (
+          <>
+            <h3 className="font-serif text-xl text-charcoal mb-1">{t("rateVisitTitle")}</h3>
+            <p className="text-sm text-muted mb-4">
+              {t("rateVisitSubtitle", { name: booking.restaurants?.name || "" })}
+            </p>
+            <div className="text-xs text-muted mb-4">
+              {booking.booking_date} · {t("guestsCount", { count: booking.party_size })}
+            </div>
+            <div className="flex justify-center mb-4">
+              <StarPicker value={value} onChange={setValue} size={32} />
+            </div>
+            <textarea
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              placeholder={t("addCommentPlaceholder")}
+              rows={3}
+              className="w-full rounded-2xl px-4 py-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe mb-4 resize-none"
+            />
+            <button
+              onClick={onSubmit}
+              disabled={submitting || value === 0}
+              className="w-full rounded-full py-3 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60 mb-3"
+            >
+              {submitting ? t("pleaseWait") : t("submitRating")}
+            </button>
+            <button onClick={onDismiss} className="w-full text-center text-xs text-muted underline">
+              {t("notNow")}
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function CustomerAuthForm({
   mode,
@@ -188,6 +302,13 @@ export default function DinerPage() {
   const [zoneAvailability, setZoneAvailability] = useState({});
   const [timeAvailability, setTimeAvailability] = useState({});
   const [bookingsView, setBookingsView] = useState("current");
+  const [reviewedBookingIds, setReviewedBookingIds] = useState(new Set());
+  const [ratingPromptBooking, setRatingPromptBooking] = useState(null);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [submittingRating, setSubmittingRating] = useState(false);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [activeRestaurantRating, setActiveRestaurantRating] = useState(null);
   const [editingBooking, setEditingBooking] = useState(null);
   const [editParty, setEditParty] = useState(2);
   const [editTime, setEditTime] = useState("");
@@ -344,6 +465,12 @@ export default function DinerPage() {
       .eq("restaurant_id", r.id)
       .order("sort_order");
     setMenuItems(data || []);
+    setActiveRestaurantRating(null);
+    const { data: ratings } = await supabase.from("reviews").select("rating").eq("restaurant_id", r.id);
+    if (ratings && ratings.length > 0) {
+      const average = ratings.reduce((sum, row) => sum + row.rating, 0) / ratings.length;
+      setActiveRestaurantRating({ average, count: ratings.length });
+    }
     setScreen("restaurant");
   }
 
@@ -485,6 +612,73 @@ export default function DinerPage() {
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     setMyBookings(data || []);
+  }
+
+  // Checks, once per login, for a dined booking the customer hasn't reviewed
+  // and hasn't dismissed yet, and surfaces it as the rating prompt — this is
+  // what makes it appear "the next time the customer opens the app" rather
+  // than only when they happen to visit My Bookings.
+  useEffect(() => {
+    if (!user) {
+      setReviewedBookingIds(new Set());
+      setRatingPromptBooking(null);
+      return;
+    }
+    let cancelled = false;
+    async function checkForRatingPrompt() {
+      const { data: reviews } = await supabase.from("reviews").select("booking_id").eq("user_id", user.id);
+      if (cancelled) return;
+      const reviewedSet = new Set((reviews || []).map((r) => r.booking_id));
+      setReviewedBookingIds(reviewedSet);
+
+      const { data: dined } = await supabase
+        .from("bookings")
+        .select("*, restaurants(name)")
+        .eq("user_id", user.id)
+        .eq("status", "dined");
+      if (cancelled) return;
+      const dismissed = getDismissedRatingIds();
+      const candidate = (dined || []).find((b) => !reviewedSet.has(b.id) && !dismissed.includes(b.id));
+      if (candidate) setRatingPromptBooking(candidate);
+    }
+    checkForRatingPrompt();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  function openRatingPrompt(booking) {
+    setRatingValue(0);
+    setRatingComment("");
+    setRatingSubmitted(false);
+    setRatingPromptBooking(booking);
+  }
+
+  function dismissRatingPrompt() {
+    if (ratingPromptBooking) dismissRatingPromptId(ratingPromptBooking.id);
+    setRatingPromptBooking(null);
+  }
+
+  async function submitRating() {
+    if (!ratingPromptBooking || ratingValue === 0) return;
+    setSubmittingRating(true);
+    const { error } = await supabase.from("reviews").insert({
+      booking_id: ratingPromptBooking.id,
+      restaurant_id: ratingPromptBooking.restaurant_id,
+      user_id: user.id,
+      rating: ratingValue,
+      comment: ratingComment.trim() || null,
+    });
+    setSubmittingRating(false);
+    if (error) {
+      console.error("Submitting rating failed:", error.message);
+      alert(t("authServerError"));
+      return;
+    }
+    setReviewedBookingIds((prev) => new Set(prev).add(ratingPromptBooking.id));
+    dismissRatingPromptId(ratingPromptBooking.id);
+    setRatingSubmitted(true);
+    setTimeout(() => setRatingPromptBooking(null), 1500);
   }
 
   function shareBooking(booking) {
@@ -717,6 +911,16 @@ export default function DinerPage() {
           </button>
 
           <h2 className="font-serif text-2xl text-charcoal mt-2">{active.name}</h2>
+          {activeRestaurantRating && (
+            <div className="flex mt-1.5">
+              <span className="flex items-center gap-1" style={{ direction: "ltr" }}>
+                <RatingStar average={activeRestaurantRating.average} size={14} />
+                <span className="text-xs font-semibold text-charcoal">
+                  {activeRestaurantRating.average.toFixed(1)}
+                </span>
+              </span>
+            </div>
+          )}
           <div className="text-xs mt-2 text-muted">
             {active.cuisine} · {active.price_tier}
           </div>
@@ -1339,6 +1543,14 @@ export default function DinerPage() {
                         {b.status === "confirmed" ? t("cancelReservation") : t("cancelRequest")}
                       </button>
                     )}
+                    {b.status === "dined" && !reviewedBookingIds.has(b.id) && (
+                      <button
+                        onClick={() => openRatingPrompt(b)}
+                        className="flex-1 text-xs font-medium rounded-full px-3 py-2.5 bg-tan text-charcoal"
+                      >
+                        {t("rateThisBooking")}
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -1543,6 +1755,21 @@ export default function DinerPage() {
           {t("account")}
         </button>
       </div>
+
+      {ratingPromptBooking && (
+        <RatingPromptModal
+          booking={ratingPromptBooking}
+          value={ratingValue}
+          setValue={setRatingValue}
+          comment={ratingComment}
+          setComment={setRatingComment}
+          submitting={submittingRating}
+          submitted={ratingSubmitted}
+          onSubmit={submitRating}
+          onDismiss={dismissRatingPrompt}
+          t={t}
+        />
+      )}
     </div>
   );
 }

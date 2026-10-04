@@ -64,10 +64,24 @@ create table bookings (
   created_at timestamp with time zone default now()
 );
 
+-- Post-dining ratings. One review per booking (enforced by the unique
+-- constraint below, as well as by RLS — see the INSERT policy further down).
+create table reviews (
+  id uuid primary key default uuid_generate_v4(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  restaurant_id uuid not null references restaurants(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  rating smallint not null check (rating between 1 and 5),
+  comment text,
+  created_at timestamp with time zone default now(),
+  unique (booking_id)
+);
+
 -- Basic indexes for the queries you'll run constantly
 create index idx_bookings_restaurant on bookings(restaurant_id);
 create index idx_bookings_status on bookings(status);
 create index idx_bookings_user_id on bookings(user_id);
+create index idx_reviews_restaurant on reviews(restaurant_id);
 
 -- Row Level Security: turn on before going live so restaurants only see their own data
 alter table restaurants enable row level security;
@@ -117,6 +131,35 @@ create policy "Owning customer or restaurant can update a booking"
       select 1 from restaurants
       where restaurants.id = bookings.restaurant_id
       and restaurants.owner_id = auth.uid()
+    )
+  );
+
+alter table reviews enable row level security;
+
+-- Reviews are publicly readable so the average rating can show on the
+-- restaurant page without requiring a login.
+create policy "Public can view reviews"
+  on reviews for select
+  using (true);
+
+-- A customer can only insert a review for their own booking, and only once
+-- that booking has actually been marked "dined" by the restaurant — mirrors
+-- the booking-status value-check pattern used for bookings UPDATE above (the
+-- same kind of self-approval exploit it closes: without the status/ownership
+-- check here, a customer could review a booking that isn't theirs, or one
+-- that was never dined). No UPDATE or DELETE policy exists at all, so RLS
+-- denies both outright — nobody can edit or delete any review, their own or
+-- anyone else's.
+create policy "Customers can review their own dined booking"
+  on reviews for insert
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from bookings b
+      where b.id = reviews.booking_id
+        and b.user_id = auth.uid()
+        and b.status = 'dined'
+        and b.restaurant_id = reviews.restaurant_id
     )
   );
 
