@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
 import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
@@ -288,6 +288,7 @@ export default function DinerPage() {
   const [loading, setLoading] = useState(true);
   const [screen, setScreen] = useState("home");
   const [active, setActive] = useState(null);
+  const dateStripRef = useRef(null);
   const [query, setQuery] = useState("");
   const [party, setParty] = useState(2);
   const [time, setTime] = useState("");
@@ -855,6 +856,31 @@ export default function DinerPage() {
 
   const trackingTimeAvailability = Object.keys(timeAvailability).length > 0;
 
+  const dateStripDays = active
+    ? generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US")
+    : [];
+
+  // Defends against the selected date ever being off-strip or unset (which
+  // would otherwise show the strip with no day highlighted) — falls back to
+  // the first bookable date — and scrolls that selected day into view
+  // whenever the Booking screen opens, since its default scroll position is
+  // 0 but RTL and future-dated windows don't always put the selected day
+  // there visually.
+  useEffect(() => {
+    if (screen !== "book" || dateStripDays.length === 0) return;
+    if (!dateStripDays.some((d) => d.value === bookingDate)) {
+      setBookingDate(dateStripDays[0].value);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      dateStripRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({
+        inline: "center",
+        block: "nearest",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [screen, active, bookingDate]);
+
   const accountDisplayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || t("guest");
   const accountAvatarInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "?";
 
@@ -985,7 +1011,7 @@ export default function DinerPage() {
       )}
 
       {tab === "discover" && screen === "book" && active && (
-        <div className="pt-4">
+        <div className="pt-[calc(20px+env(safe-area-inset-top))]">
           <button onClick={() => setScreen("restaurant")} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
             <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
           </button>
@@ -995,7 +1021,8 @@ export default function DinerPage() {
           <div className="w-8 h-0.5 bg-brass my-3.5" />
 
           <div
-            className="flex snap-x snap-mandatory overflow-x-auto mt-2 mb-5 pb-1"
+            ref={dateStripRef}
+            className="flex snap-x snap-mandatory overflow-x-auto mt-2 mb-3 pb-1"
             style={{
               WebkitMaskImage:
                 "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
@@ -1003,32 +1030,31 @@ export default function DinerPage() {
                 "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
             }}
           >
-            {generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US").map(
-              (d) => {
-                const selected = bookingDate === d.value;
-                const isPast = d.value < toLocalDateStr(new Date());
-                return (
-                  <button
-                    key={d.value}
-                    onClick={() => setBookingDate(d.value)}
-                    className={`flex min-w-0 flex-[0_0_calc(100%/7)] snap-start flex-col items-center gap-1.5 ${
-                      isPast ? "opacity-35" : ""
+            {dateStripDays.map((d) => {
+              const selected = bookingDate === d.value;
+              const isPast = d.value < toLocalDateStr(new Date());
+              return (
+                <button
+                  key={d.value}
+                  data-selected={selected}
+                  onClick={() => setBookingDate(d.value)}
+                  className={`flex min-w-0 flex-[0_0_calc(100%/7)] snap-start flex-col items-center gap-1.5 ${
+                    isPast ? "opacity-35" : ""
+                  }`}
+                >
+                  <span className="w-full truncate text-center text-sm text-taupe">
+                    {lang === "ar" ? d.weekday : d.weekday.slice(0, 2)}
+                  </span>
+                  <span
+                    className={`w-[38px] h-[38px] rounded-full flex items-center justify-center text-[18px] ${
+                      selected ? "bg-burgundy text-offwhite" : "text-charcoal"
                     }`}
                   >
-                    <span className="w-full truncate text-center text-base text-taupe">
-                      {lang === "ar" ? d.weekday : d.weekday.slice(0, 2)}
-                    </span>
-                    <span
-                      className={`w-12 h-12 rounded-full flex items-center justify-center text-[22px] ${
-                        selected ? "bg-burgundy text-offwhite" : "text-charcoal"
-                      }`}
-                    >
-                      {d.day}
-                    </span>
-                  </button>
-                );
-              }
-            )}
+                    {d.day}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
           <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("partySize")}</label>

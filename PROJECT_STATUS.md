@@ -809,6 +809,43 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   (unchanged logic), and compared a zoomed screenshot of the live result side-by-side
   against the user's reference image — matching weekday-label style, number style and
   size, and selected-circle size/color.
+- **Date strip sizing/spacing pass + default-selection bug fix (2026-10-04, same day,
+  follow-up):** three small adjustments to the just-redesigned date strip, styling/layout
+  only except where noted.
+  1. **Smaller strip:** weekday labels `text-base` (16px) → `text-sm` (14px); day numbers
+     `text-[22px]` → `text-[18px]`; selected-day circle `w-12 h-12` (48px) →
+     `w-[38px] h-[38px]` (38px). Still exactly 7 equal-width cells (`flex-[0_0_calc(100%/7)]`
+     unchanged) and the same edge fade.
+  2. **Tighter vertical rhythm:** the gap between each cell's weekday label and its number
+     (`gap-1.5`, 6px) was already within the requested 6–8px and was left as-is; the gap
+     between the strip and the "PARTY SIZE" label (`mb-5 pb-1` = 24px) is now `mb-3 pb-1` =
+     16px.
+  3. **Top padding:** the Booking screen's wrapper changed from `pt-4` (16px, fixed) to
+     `pt-[calc(20px+env(safe-area-inset-top))]`, so the header gets 20px of breathing room
+     plus the device's real notch/status-bar inset on a phone, rather than a flat value
+     that's the same whether or not the device has a safe area to clear. (Scoped to the
+     Booking screen only, per the request — the other screens' `pt-4` wasn't touched.)
+  4. **Bug fix (the one logic change in this pass):** the selected date could end up
+     scrolled out of view with no day visibly highlighted — reproduced live by scrolling
+     the strip away and leaving/re-entering the screen (matching exactly what the user
+     described: strip showing unrelated later days, no burgundy circle anywhere). Two
+     additions in `app/page.js`: (a) a `useEffect` keyed on `[screen, active, bookingDate]`
+     that, whenever the Booking screen is open, checks whether `bookingDate` matches any
+     day in the currently-generated strip and falls back to the first bookable date if not
+     (defensive — in practice `openRestaurant()`'s default always matches the strip's first
+     entry already, but this guarantees the invariant "a day is always selected" even if
+     that ever changes); (b) the same effect scrolls the selected day's button into view
+     (`scrollIntoView({ inline: "center", block: "nearest" })`, via a `data-selected`
+     attribute and a `dateStripRef`) inside a `requestAnimationFrame` so it runs after
+     layout. Re-tested the exact repro after the fix: scrolling away and leaving/re-entering
+     the screen now reliably re-shows the selected day, confirmed in both English and
+     genuine (pre-auto-translate) Arabic/RTL.
+  **Verified via direct DOM measurement** (not just eyeballing): label font-size 14px,
+  number font-size 18px, circle 38×38px, label-to-number gap 6px, strip-to-PartySize gap
+  20px (top of the requested 16–20px range), exactly 7 cells (`strip.clientWidth /
+  cellWidth` ≈ 7.0005), and the compiled CSS rule for the top-padding class confirmed to
+  literally contain `calc(20px + env(safe-area-inset-top))` (not just resolve to a flat
+  20px because this dev browser has no real safe-area inset to add).
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
