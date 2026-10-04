@@ -762,6 +762,53 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     test bookings and reviews created during this pass were deleted afterward; the 3
     pre-existing unrelated bookings in the table (from before this session) were left
     untouched.
+- **Booking screen date strip redesigned to a 7-up weekday-picker layout (2026-10-04):**
+  pure layout/styling pass against a reference image (Talabat-style picker) — the real
+  date-range/availability logic (`generateDateStrip`) was not touched. The "DATE" label
+  above the strip is removed. Each day cell is now exactly `flex-[0_0_calc(100%/7)]` so
+  precisely 7 cells fill the card's width (was unconstrained-width content-sized cells with
+  a `gap`, letting ~9 narrow days show at once). The container has `snap-x snap-mandatory`
+  and each cell `snap-start`, so scrolling (through the real booking window, unchanged)
+  settles cleanly on a 7-day boundary. Weekday labels are 2-letter in English (`d.weekday.slice(0,
+  2)` — "Su", "Mo"…, a presentational truncation of the existing `Intl.DateTimeFormat`
+  output, not a logic change) and the full Arabic short-form weekday name in Arabic (Intl's
+  "short" width already returns the full word for `ar` — there's no shorter standard form);
+  `text-base` regular weight, no uppercase/tracking, `text-taupe`. Day numbers are
+  `text-[22px]` regular weight `text-charcoal`; the selected-day circle grew from 36px to
+  48px (`w-12 h-12`) with white text on burgundy. A `isPast` check (`d.value < today's date
+  string`) dims a day to `opacity-35` if present — purely defensive/presentational, since
+  `generateDateStrip`'s loop always starts at `today + min_advance_days` (never before
+  today) for every restaurant currently in the schema, so this never actually fires with
+  real data today; it's there only to match the reference image's dimmed-past-day example
+  and to be ready if that ever changes. The edge fade (added 2026-10-04 earlier the same
+  day) was tuned from a single hard-ish two-stop gradient to a 6-stop ~40px eased ramp
+  (`transparent → 40% opacity by 12px → opaque by 40px`, mirrored on the other edge) so all
+  7 resting days stay clearly readable with only the outermost one or two slightly
+  softened, and newly-revealed days fade in smoothly while scrolling.
+  **Real bug found and fixed during live testing, not just a styling tweak:** the initial
+  implementation used `flex-[0_0_calc(100%/7)]` alone, which still let a day cell grow
+  wider than 1/7 if its weekday-label text was wider than the cell (flex items default to
+  `min-width: auto`, which ignores `flex-shrink: 0`'s intent and refuses to shrink below
+  the content's own intrinsic width) — this broke the uniform grid and, as a direct
+  consequence, made native CSS scroll-snap settle on seemingly "wrong" (non-cell-aligned)
+  positions, since the browser was correctly snapping to each cell's *actual* (non-uniform)
+  rendered edge, not the uniform 1/7 width the layout was supposed to guarantee. Fixed by
+  adding `min-w-0` to each cell and `truncate` to the weekday label, so long label text
+  (verified specifically against Chrome's own auto-translate injecting full day names like
+  "Wednesday" during testing — see the edge-fade bullet above for that known gotcha) clips
+  inside the fixed-width cell instead of forcing it wider. Verified via direct DOM
+  measurement (`getBoundingClientRect()` on every cell) that all cells are exactly
+  58.28px wide pre- and post-fix comparison, and that `scrollLeft` after a scroll resolves
+  to within ~0.002 of an exact multiple of the cell width (clean snap), both of which
+  failed before the fix.
+  **Tested live** in both English and Arabic/RTL (genuine, pre-auto-translate, in a fresh
+  tab each time — see the known Chrome-translate gotcha noted above): confirmed exactly 7
+  full days visible at rest with no partial 8th cell, confirmed scrolling in both
+  directions through the real booking window settles cleanly on 7-day boundaries with the
+  fade visibly animating as days cross the edge, confirmed day selection still works
+  (unchanged logic), and compared a zoomed screenshot of the live result side-by-side
+  against the user's reference image — matching weekday-label style, number style and
+  size, and selected-circle size/color.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the

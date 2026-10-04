@@ -994,28 +994,32 @@ export default function DinerPage() {
           </h2>
           <div className="w-8 h-0.5 bg-brass my-3.5" />
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("date")}</label>
           <div
-            className="flex gap-2.5 overflow-x-auto mt-2 mb-5 pb-1"
+            className="flex snap-x snap-mandatory overflow-x-auto mt-2 mb-5 pb-1"
             style={{
               WebkitMaskImage:
-                "linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent)",
+                "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
               maskImage:
-                "linear-gradient(to right, transparent, black 32px, black calc(100% - 32px), transparent)",
+                "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
             }}
           >
             {generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US").map(
               (d) => {
                 const selected = bookingDate === d.value;
+                const isPast = d.value < toLocalDateStr(new Date());
                 return (
                   <button
                     key={d.value}
                     onClick={() => setBookingDate(d.value)}
-                    className="flex flex-col items-center gap-1.5 flex-shrink-0"
+                    className={`flex min-w-0 flex-[0_0_calc(100%/7)] snap-start flex-col items-center gap-1.5 ${
+                      isPast ? "opacity-35" : ""
+                    }`}
                   >
-                    <span className="text-[10px] text-taupe font-medium uppercase">{d.weekday}</span>
+                    <span className="w-full truncate text-center text-base text-taupe">
+                      {lang === "ar" ? d.weekday : d.weekday.slice(0, 2)}
+                    </span>
                     <span
-                      className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold ${
+                      className={`w-12 h-12 rounded-full flex items-center justify-center text-[22px] ${
                         selected ? "bg-burgundy text-offwhite" : "text-charcoal"
                       }`}
                     >
