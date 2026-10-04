@@ -1020,9 +1020,10 @@ export default function DinerPage() {
           </h2>
           <div className="w-8 h-0.5 bg-brass my-3.5" />
 
+          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("date")}</label>
           <div
             ref={dateStripRef}
-            className="flex snap-x snap-mandatory overflow-x-auto mt-2 mb-3 pb-1"
+            className="flex snap-x snap-mandatory overflow-x-auto mt-3 mb-7 pb-1"
             style={{
               WebkitMaskImage:
                 "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
@@ -1057,8 +1058,12 @@ export default function DinerPage() {
             })}
           </div>
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("partySize")}</label>
-          <div className="flex items-center justify-between mt-2 mb-5 rounded-2xl px-4 py-3 bg-card">
+          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("partySize")}</label>
+          <div
+            className={`flex items-center justify-between mt-3 rounded-2xl px-4 py-3 bg-card ${
+              party >= (active.max_party_size ?? 14) ? "mb-2" : "mb-7"
+            }`}
+          >
             <span className="text-sm font-semibold text-charcoal flex items-center gap-2">
               <Users size={14} /> {t("partySize")}
             </span>
@@ -1080,16 +1085,16 @@ export default function DinerPage() {
               </button>
             </div>
           </div>
-          <p className="text-[11px] text-taupe -mt-3 mb-5">
-            {party >= (active.max_party_size ?? 14)
-              ? t("partySizeMaxNote", { max: active.max_party_size ?? 14 })
-              : t("partySizeHint")}
-          </p>
+          {party >= (active.max_party_size ?? 14) && (
+            <p className="text-[11px] text-taupe mb-7">
+              {t("partySizeMaxNote", { max: active.max_party_size ?? 14 })}
+            </p>
+          )}
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">
+          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">
             {t("timeTonight")} ({active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"})
           </label>
-          <div className="grid grid-cols-3 gap-2 mt-2 mb-5">
+          <div className="grid grid-cols-3 gap-2 mt-3 mb-7">
             {generateTimeSlots(active.opening_time, active.closing_time).map((tm) => {
               const remaining = timeAvailability[tm];
               const full = trackingTimeAvailability && remaining === 0;
@@ -1118,8 +1123,8 @@ export default function DinerPage() {
             })}
           </div>
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("celebrating")}</label>
-          <div className="grid grid-cols-4 gap-2 mt-2 mb-5">
+          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("celebrating")}</label>
+          <div className="grid grid-cols-4 gap-2 mt-3 mb-7">
             {OCCASIONS.map((o) => {
               const Icon = o.icon;
               const selected = occasion === o.label;

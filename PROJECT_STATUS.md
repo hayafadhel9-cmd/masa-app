@@ -846,6 +846,48 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   cellWidth` ≈ 7.0005), and the compiled CSS rule for the top-padding class confirmed to
   literally contain `calc(20px + env(safe-area-inset-top))` (not just resolve to a flat
   20px because this dev browser has no real safe-area inset to add).
+- **Booking screen unified spacing pass + party-size hint removed (2026-10-04, same day,
+  second follow-up):** supersedes the ad-hoc per-section spacing from the two bullets
+  above with one consistent system across all four sections on the screen (Date, Party
+  size, Time, Celebrating anything) — each is a `<label>` followed by its content, now
+  spaced identically everywhere: **12px** between a label and its content, **28px**
+  between one section's content and the next section's label.
+  - **Hint text removed:** "Enter your exact group size — we'll seat you at the right
+    table." is gone (English and Arabic), along with its now-unused `partySizeHint`
+    translation key in both locales. The max-party-size warning
+    (`partySizeMaxNote`, "For groups larger than {max}…") is a *different*, still-needed
+    message — it's now conditionally rendered (only when `party >= max_party_size`,
+    previously it unconditionally occupied that slot, showing the hint the rest of the
+    time) with its own tight ~8px gap down from the party-size box and the standard 28px
+    down to "TIME", so removing the generic hint doesn't leave a gap-sized hole and the
+    max-note still reads as clearly attached to the stepper above it.
+  - **"DATE" label restored** above the date strip (removed in an earlier pass this same
+    day, brought back here at the user's request) — same classes as the other three
+    section labels (`text-[11px] font-bold uppercase tracking-widest text-taupe`), plus
+    the `date` translation key (`"Date"` / `"التاريخ"`) re-added to `lib/LanguageContext.js`.
+  - **Real cross-browser layout quirk found and fixed, not just a Tailwind class swap:**
+    initially set each section's content to `mt-3` (12px) / `mb-7` (28px) and measured the
+    actual rendered gaps — they came out to 16px / 36px, a consistent +4px over target on
+    every single section. Root cause: `<label>` has no default `display` override in this
+    app (browsers render it `inline`), and an inline element's line-height creates a
+    "strut" — extra vertical space in the surrounding flow — that doesn't show up in the
+    label's own `getBoundingClientRect()` but still pushes the next block element down,
+    on top of its declared margin. Fixed by adding `block` to all four section labels;
+    re-measured afterward and every gap landed exactly on 12px / 28px, confirmed via
+    `getComputedStyle` margins *and* `getBoundingClientRect()`-based gap math agreeing
+    precisely (not just eyeballing a screenshot).
+  - Sizing (14px labels / 18px numbers / 38px circle / exactly 7 cells), the safe-area-aware
+    top padding, and the default-selection/scroll-into-view bug fix from the two bullets
+    above were all re-verified still correct after this pass — unaffected by this change,
+    which only touched vertical spacing and the two content additions (DATE label, hint
+    removal).
+  **Tested live** in both English and genuine (pre-auto-translate, fresh tab) Arabic/RTL:
+  confirmed the party-size stepper still increments/decrements correctly (including
+  hitting the real max for a live restaurant and seeing the max-note appear with correct
+  spacing) in both languages, re-ran the scroll-away-then-reopen repro for the selection
+  bug and confirmed it's still fixed, and compared before/after screenshots showing the
+  section rhythm now visibly even top to bottom (screenshots saved locally during the
+  session, not committed to the repo).
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
