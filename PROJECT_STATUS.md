@@ -888,6 +888,22 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   bug and confirmed it's still fixed, and compared before/after screenshots showing the
   section rhythm now visibly even top to bottom (screenshots saved locally during the
   session, not committed to the repo).
+- **Booking screen heading changed from "Reserve at" to "Held at" (2026-10-05):** the
+  `reserveAt` translation key's English value changed from "Reserve at" to "Held at" —
+  styling untouched (`font-serif text-xl text-charcoal` for the phrase, `italic
+  text-burgundy` for the restaurant name, same gold underline divider below). Arabic
+  changed from "احجز في" (an imperative "Book at") to "محجوز في" ("Held/reserved at," a
+  passive participle) — chosen to reuse the exact word already used for `heldStatus` in
+  Arabic ("محجوز") elsewhere in the app, rather than inventing new vocabulary for the same
+  English concept. **Searched the whole app first, as requested, before touching anything
+  beyond this one heading:** the `reserveAt` key is used in exactly one place
+  (`app/page.js`'s Booking screen heading); the confirmation screen says "Table requested"
+  and the shareable booking-detail page (`app/booking/[id]/page.js`) only shows a status
+  pill — neither uses this wording. Found one related-but-different heading that was
+  deliberately left alone: the edit-existing-booking screen uses a separate key,
+  `editReservation` ("Edit reservation at"), not matched by this request. **Tested live**
+  in both English (confirmed "Held at *test 2*" renders with the original styling intact)
+  and genuine (pre-auto-translate) Arabic ("محجوز في test 2", correctly RTL-ordered).
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
