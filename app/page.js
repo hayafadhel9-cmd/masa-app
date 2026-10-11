@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
 import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
-import { generateTimeSlots } from "../lib/timeSlots";
+import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
@@ -238,6 +238,16 @@ function CustomerAuthForm({
   );
 }
 
+// Shared by the date strip and the hour row — fades items near the left/right
+// edges of a horizontally-scrolling container. Symmetric, so it needs no
+// RTL-specific handling (see the 2026-10-04 edge-fade bullet in PROJECT_STATUS.md).
+const EDGE_FADE_STYLE = {
+  WebkitMaskImage:
+    "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
+  maskImage:
+    "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
+};
+
 const ZONE_ICONS = {
   Indoor: Home,
   Outdoor: Trees,
@@ -289,6 +299,7 @@ export default function DinerPage() {
   const [screen, setScreen] = useState("home");
   const [active, setActive] = useState(null);
   const dateStripRef = useRef(null);
+  const hourStripRef = useRef(null);
   const [query, setQuery] = useState("");
   const [party, setParty] = useState(2);
   const [time, setTime] = useState("");
@@ -881,6 +892,45 @@ export default function DinerPage() {
     return () => cancelAnimationFrame(frame);
   }, [screen, active, bookingDate]);
 
+  // Two-step time picker: hours grouped from the same real slot list the old
+  // chip grid used, so the eventual `time` value (and saved booking_time) is
+  // byte-for-byte identical to before — only how it's picked changed.
+  const hourGroups = active ? groupSlotsByHour(generateTimeSlots(active.opening_time, active.closing_time)) : [];
+  const selectedHourLabel = hourLabelOfSlot(time);
+  const selectedHourGroup = hourGroups.find((g) => g.label === selectedHourLabel);
+
+  function isSlotFull(slot) {
+    return trackingTimeAvailability && timeAvailability[slot] === 0;
+  }
+  function isHourDisabled(group) {
+    return trackingTimeAvailability && group.slots.every((s) => isSlotFull(s.full));
+  }
+  function selectHour(group) {
+    const pick = group.slots.find((s) => !isSlotFull(s.full)) || group.slots[0];
+    if (pick) setTime(pick.full);
+  }
+
+  // Defends against `time` ever being unset, off the real slot list, or
+  // pointing at a now-full slot (e.g. after changing the date) — same
+  // "always something selected" pattern as the date-strip fix above — by
+  // falling back to the first genuinely available slot.
+  useEffect(() => {
+    if (screen !== "book" || hourGroups.length === 0) return;
+    const flatSlots = hourGroups.flatMap((g) => g.slots.map((s) => s.full));
+    if (!flatSlots.includes(time) || isSlotFull(time)) {
+      const firstAvailable = flatSlots.find((s) => !isSlotFull(s)) || flatSlots[0];
+      if (firstAvailable && firstAvailable !== time) setTime(firstAvailable);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      hourStripRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({
+        inline: "center",
+        block: "nearest",
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [screen, active, bookingDate, timeAvailability]);
+
   const accountDisplayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || t("guest");
   const accountAvatarInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "?";
 
@@ -1024,12 +1074,7 @@ export default function DinerPage() {
           <div
             ref={dateStripRef}
             className="flex snap-x snap-mandatory overflow-x-auto mt-3 mb-7 pb-1"
-            style={{
-              WebkitMaskImage:
-                "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
-              maskImage:
-                "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
-            }}
+            style={EDGE_FADE_STYLE}
           >
             {dateStripDays.map((d) => {
               const selected = bookingDate === d.value;
@@ -1091,36 +1136,54 @@ export default function DinerPage() {
             </p>
           )}
 
-          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">
-            {t("timeTonight")} ({active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"})
-          </label>
-          <div className="grid grid-cols-3 gap-2 mt-3 mb-7">
-            {generateTimeSlots(active.opening_time, active.closing_time).map((tm) => {
-              const remaining = timeAvailability[tm];
-              const full = trackingTimeAvailability && remaining === 0;
-              const selected = time === tm;
-              return (
-                <button
-                  key={tm}
-                  disabled={full}
-                  onClick={() => setTime(tm)}
-                  className={`rounded-2xl py-2.5 text-xs font-semibold flex flex-col items-center gap-0.5 ${
-                    full
-                      ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
-                      : selected
-                      ? "bg-burgundy text-offwhite"
-                      : "bg-tan text-charcoal"
-                  }`}
-                >
-                  {tm}
-                  {trackingTimeAvailability && (
-                    <span className={`text-[9px] font-medium ${full ? "text-warn" : selected ? "text-offwhite/70" : "text-muted"}`}>
-                      {full ? t("slotFull") : t("tablesLeft", { count: remaining })}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+          <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("timeTonight")}</label>
+          <div className="mt-3 mb-7">
+            <div ref={hourStripRef} className="flex gap-2 overflow-x-auto pb-1" style={EDGE_FADE_STYLE}>
+              {hourGroups.map((group) => {
+                const disabled = isHourDisabled(group);
+                const selected = group.label === selectedHourLabel;
+                return (
+                  <button
+                    key={group.label}
+                    data-selected={selected}
+                    disabled={disabled}
+                    onClick={() => selectHour(group)}
+                    className={`shrink-0 min-w-[58px] rounded-2xl px-3 py-2.5 text-xs font-semibold ${
+                      disabled
+                        ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
+                        : selected
+                        ? "bg-burgundy text-offwhite"
+                        : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {group.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {["00", "30"].map((minute) => {
+                const slot = selectedHourGroup?.slots.find((s) => s.minute === minute);
+                const disabled = !slot || isSlotFull(slot.full);
+                const selected = !!slot && slot.full === time;
+                return (
+                  <button
+                    key={minute}
+                    disabled={disabled}
+                    onClick={() => slot && setTime(slot.full)}
+                    className={`rounded-2xl py-2.5 text-xs font-semibold ${
+                      disabled
+                        ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
+                        : selected
+                        ? "bg-burgundy text-offwhite"
+                        : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    :{minute}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("celebrating")}</label>

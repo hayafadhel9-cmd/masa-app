@@ -904,6 +904,79 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   `editReservation` ("Edit reservation at"), not matched by this request. **Tested live**
   in both English (confirmed "Held at *test 2*" renders with the original styling intact)
   and genuine (pre-auto-translate) Arabic ("محجوز في test 2", correctly RTL-ordered).
+- **Booking screen Time section replaced with a two-step hour → minute picker
+  (2026-10-11):** layout/styling pass, per the request — the real availability/capacity
+  logic, the min/max-advance-window and date-strip logic, and the exact `booking_time`
+  string ultimately saved are all unchanged.
+  - **What was already done before this session (verified, not rebuilt):** the unified
+    12px label-to-content / 28px section-to-section spacing, the safe-area-aware top
+    padding, and the default-date-selection/scroll-into-view bug fix were all already in
+    place from the 2026-10-04 passes (see the three bullets above) and were re-verified
+    live via `getBoundingClientRect()`/`getComputedStyle()` DOM measurement (every gap
+    measured exactly 12px/28px, in both English and Arabic) rather than re-implemented.
+    The party-size hint text and its translation key were already removed in an earlier
+    pass too — nothing left to delete.
+  - **New two-step time picker:** `lib/timeSlots.js` gained two small pure helpers,
+    `groupSlotsByHour(slots)` (buckets a flat slot list like `generateTimeSlots` already
+    produced into per-hour groups, e.g. `"6 PM"` → `[{minute:"00",full:"6:00 PM"},
+    {minute:"30",full:"6:30 PM"}]`, preserving chronological order; an hour right before
+    closing may have only a `":00"` entry, not a `":30"` one) and `hourLabelOfSlot(slot)`
+    (`"6:30 PM"` → `"6 PM"`). `app/page.js`'s Booking screen now renders a horizontally-
+    scrollable hour-chip row (same `overflow-x-auto` + edge-fade technique as the date
+    strip — the fade gradient was pulled into a shared `EDGE_FADE_STYLE` constant so both
+    rows use the identical gradient, not a copy-pasted one) followed by a fixed two-chip
+    `":00"`/`":30"` row for whichever hour is selected. The `(opening–closing)` range text
+    that used to follow the "TIME" label is gone — the label is just `{t("timeTonight")}`
+    now, unchanged value ("Time"/"الوقت").
+  - **`time` state is still the single source of truth**, still holds the exact same
+    `"6:30 PM"`-style string `generateTimeSlots` always produced, and `confirmBooking()`'s
+    `booking_time: time` is byte-for-byte unchanged — the picker only changed how that
+    string gets chosen, not what gets saved. Selected hour/minute are *derived* from `time`
+    via `hourLabelOfSlot`, not tracked in separate state, so there's no new state to drift
+    out of sync.
+  - **Availability reuses the exact same `trackingTimeAvailability`/`timeAvailability`
+    values** the old 3-column chip grid read (computed by the pre-existing
+    `loadTimeAvailability()`, untouched) — a minute chip is disabled under the identical
+    `trackingTimeAvailability && timeAvailability[slot] === 0` condition the old grid used
+    for "Full"; an hour chip is disabled only if *every* real minute in it is full
+    (`group.slots.every(...)`); a minute with no real slot at all (the near-closing-time
+    edge case above) renders as a disabled chip too, so the UI always shows exactly two
+    equal-width minute chips as requested, never a lopsided one. The "N left"/"Full" seat-
+    count text is gone, matching the request (plain chip labels only).
+  - **Always-selected + scroll-into-view:** a new `useEffect` (same pattern as the existing
+    date-strip fix) falls back to the first genuinely available slot in chronological order
+    whenever the current `time` is off the real slot list or has become full (e.g. after
+    switching dates), and scrolls the selected hour chip into view via a new `hourStripRef`
+    + `data-selected` attribute, mirroring `dateStripRef`'s existing mechanism.
+  - **Tested live** (local dev server, real Supabase project) against the one real
+    restaurant currently in the database (`test 2`, 18:00–00:00, 7 hour chips 6 PM…12 AM):
+    confirmed exactly 12px/28px spacing and 11px/700/1.1px-tracking label styling identical
+    across all four sections via DOM measurement; confirmed all 7 hour chips render at
+    ≥58px wide with no clipped label text; picked 9 PM/:30 and separately (in Arabic) 8
+    PM/:30, completed both bookings end-to-end, and confirmed via direct SQL against the
+    live `bookings` table that `booking_time` saved as exactly `"9:30 PM"` and `"8:30 PM"`
+    respectively — both test bookings deleted afterward. Confirmed in Arabic/RTL: hour row
+    and minute row both mirror correctly (6 PM starts at the right edge, scrolling runs
+    right-to-left; the `:00`/`:30` pair also flips order under `dir="rtl"`), spacing
+    measurements matched English exactly, and the saved time was unaffected by language.
+    This restaurant's `zone_capacity` only has one of its three zones tracked (`Indoor:1`,
+    `Outdoor`/`Shisha Terrace` at 0/untracked), so `trackingTimeAvailability` was `false`
+    throughout this session's live testing — which doubles as the requested "restaurant
+    with no zone capacity configured still works" check (booked successfully with no
+    dimming shown, no errors). **Not independently tested live:** a restaurant where every
+    zone *is* capacity-tracked, to visually confirm a dimmed/disabled hour and the
+    "one open minute, the other dimmed" case — doing so would have meant writing to this
+    restaurant's `zone_capacity` (restaurant-dashboard-owned data), which was out of scope
+    per "test from the customer side only, stop and ask if a step needs the dashboard"; a
+    bulk SQL write attempting this was also declined by the environment's own auto-mode
+    safety classifier. Instead verified by code review plus a standalone unit test of the
+    new `groupSlotsByHour`/`hourLabelOfSlot` helpers (confirmed the near-closing-time
+    single-minute edge case groups correctly) — the disabled/dimmed conditions themselves
+    are the same `trackingTimeAvailability && timeAvailability[slot] === 0` check the old,
+    already-shipped chip grid used, just applied per-hour and per-minute instead of per-
+    slot, so this is a low-risk reuse rather than new logic. If the user later configures
+    full zone capacity on a real restaurant, worth a quick live look to confirm the dimming
+    renders as expected.
 
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
