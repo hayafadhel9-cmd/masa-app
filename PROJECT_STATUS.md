@@ -978,6 +978,179 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     full zone capacity on a real restaurant, worth a quick live look to confirm the dimming
     renders as expected.
 
+- **Seating areas reworked from a fixed Indoor/Outdoor/Shisha Terrace set to a freeform,
+  restaurant-managed list (2026-10-13/14):** touches the schema, server-side capacity
+  enforcement, the dashboard, and the full customer booking flow. This was the largest
+  single change since the 2026-08-29 customer-accounts/security pass.
+  - **New `restaurant_areas` table** (`id`, `restaurant_id`, `name`, `capacity`), replacing
+    reliance on `restaurants.zones`/`zone_capacity`. Those two columns are left in place as
+    inert legacy data — same precedent as the already-dead `restaurant_tables` table —
+    nothing in the app reads or writes them anymore. `bookings.zone` still stores the
+    assigned area's **name as a plain text snapshot**, not a foreign key, so renaming or
+    deleting an area later never changes what a past booking shows (verified: the
+    shareable `/booking/[id]` page and My Bookings both read straight off the booking row).
+    A migration backfilled every existing restaurant's `zones[]`/`zone_capacity{}` into
+    `restaurant_areas` rows, preserving order and the exact stored capacity numbers.
+  - **Capacity semantics, and the bug fix the user asked for:** `capacity` is `null` =
+    not configured (unlimited, matches the app's prior behavior for an untracked zone);
+    `0` = configured with zero seats (nothing bookable there — this is the fix); any other
+    number = seat/table count checked against concurrent pending+confirmed bookings for
+    that exact restaurant/date/time/area. The bug this replaces: the old dashboard UI
+    always coerced a blank capacity input to a literal `0` on save
+    (`Number(zoneCapacity[z]) || 0`), and the old booking-check logic treated `0` as
+    "nothing to check" (`if (cap > 0) {...}`) — so a zone saved as `0` silently became
+    *unlimited*, the opposite of what a restaurant owner typing `0` would expect. Now `0`
+    and "not configured" are genuinely different states everywhere: the dashboard's new
+    capacity field is truly optional (blank stays `null`), and both the client-side check
+    and the new server-side trigger (below) treat `0` as always-full.
+  - **Server-side enforcement (not just the UI):** a `before insert on bookings` trigger,
+    `enforce_booking_capacity()`, re-checks capacity at the database level — looks up the
+    assigned area's capacity by `(restaurant_id, zone)`, counts existing
+    pending/confirmed bookings for that exact slot, and raises `23514` if full; skips the
+    check entirely if the area isn't found or its capacity is `null` (unlimited). A second
+    trigger, `before delete on restaurant_areas` → `prevent_unsafe_area_delete()`, blocks
+    removing an area that still has upcoming (today or later) pending/confirmed bookings,
+    and blocks removing a restaurant's last remaining area — both raise `23514` with a
+    specific message. **Real bug found and fixed during testing, not just designed on
+    paper:** the last-area guard also fired when a *restaurant itself* was deleted (its
+    `restaurant_areas` rows cascade-delete via the FK, which hit "must have at least one
+    area" and blocked the whole restaurant deletion) — fixed by skipping both guards once
+    the parent `restaurants` row is already gone (true mid-cascade, since in Postgres the
+    parent row's deletion precedes the cascaded child deletes within the same statement).
+  - **A real security gap found via Supabase's own advisor, not just assumed safe:** both
+    new trigger functions, being `SECURITY DEFINER` functions in the `public` schema, were
+    automatically exposed as directly-callable PostgREST RPC endpoints
+    (`/rest/v1/rpc/enforce_booking_capacity` etc.) to both `anon` and `authenticated`
+    roles — not how they're meant to be invoked. Fixed by revoking `EXECUTE` from
+    `public, anon, authenticated` on both functions; re-verified live afterward that the
+    triggers still fire correctly on insert/delete (Postgres invokes a trigger function via
+    the table owner's privileges, not the connecting role's `EXECUTE` grant, so this only
+    blocks *direct* RPC calls, not the triggers themselves) and that the advisor no longer
+    flags either function.
+  - **RLS for `restaurant_areas`:** public `select` (so the customer app can read areas
+    with no login, same as restaurants/menu_items); `insert`/`update`/`delete` all scoped
+    to `exists (... restaurants.owner_id = auth.uid())`, mirroring the existing
+    `menu_items` owner-scoped policies exactly.
+  - **Customer booking flow:** the separate "Where would you like to sit?" screen is gone
+    entirely — seating is now an inline, optional section on the same Booking screen as
+    Date/Party size/Time/Celebrating (placed right after Time, before Celebrating, since
+    availability depends on the chosen date/time; the request didn't specify an exact
+    position). A restaurant with exactly one area shows no seating UI at all and silently
+    books that area. 2+ areas show a `SeatingPreferenceSection` (new shared component,
+    reused by both the main flow and the edit-booking flow) — a wrapping row of chips
+    following the same label/spacing style as the other sections (confirmed via
+    `getBoundingClientRect()`: 12px label-to-content, 28px to the next section, identical
+    to Date/Party size/Time): "No preference" (selected by default, disabled only if no
+    area anywhere has space) plus one chip per area (disabled/dimmed if that specific area
+    is full for the selected date+time). Area names render exactly as the restaurant typed
+    them — no translation lookup, since they're now freeform text rather than a fixed
+    English/Arabic key set. A new `resolveAssignedArea()` helper (shared by
+    `confirmBooking()` and the edit flow's `submitEditBooking()`) does a fresh
+    live-count check right before writing the row and resolves "No preference" to the
+    first area (in the restaurant's own list order) with space — the exact same
+    "re-check right before insert, reduce but not eliminate the race window" pattern this
+    app already used for the old single-zone check. The old aggregate per-time-slot
+    "N left"/"Full" signal (`lib/areas.js`: `allAreasConfigured`, `remainingAcrossAreas`)
+    now sums across *every* area a restaurant has, not a fixed 1-3 zones, and still only
+    activates when every area has an explicit capacity (consistent with the prior
+    behavior for an untracked zone).
+  - **Edit-an-existing-booking flow** was reworked to match: its own "where would you like
+    to sit" card list is replaced by the same `SeatingPreferenceSection`, defaulting to the
+    booking's *current* area (not "No preference") so editing doesn't reset an existing
+    choice; "No preference" is still offered there too. Its time picker (the older
+    3-column chip grid, from before the main flow's hour/minute-picker redesign) was left
+    untouched — only the seating section of that screen was in scope here.
+  - **Dashboard settings:** the fixed Indoor/Outdoor/Shisha Terrace checkbox+capacity list
+    is replaced by a real CRUD list under a new "Seating areas" section, matching the
+    existing Menu section's independent-save pattern (not tied to the big "Save changes"
+    button) — add (name + optional seats), inline edit/rename (reusing the exact
+    `MenuItemRow` edit-mode pattern, renamed `AreaRow`), and delete. Deleting checks for
+    upcoming pending/confirmed bookings client-side first (a specific, friendly alert) —
+    the server trigger above is the real backstop, not the primary UX. The delete button is
+    disabled client-side whenever only one area remains (defense in depth alongside the
+    server-side last-area guard). A brand-new restaurant (first settings save, no row yet)
+    gets a default single "Indoor" area (capacity `null`) created automatically, mirroring
+    the old `zones` default — the new Seating areas section only renders once a restaurant
+    row exists, same as Menu.
+  - **Translations:** removed the now-meaningless fixed-set keys (`indoor`, `outdoor`,
+    `shishaTerrace`, `indoorDesc`, `outdoorDesc`, `shishaDesc`, plus the old zone-screen's
+    `whereSit`/`continueSecure`/`fullyBooked`, all unused once areas became freeform text
+    and the separate zone screen was removed) and added `seatingPreference`, `noPreference`,
+    `areaNamePlaceholder`, `areaCapacityPlaceholder`, `addArea`, `areaCapacityUnset`,
+    `areaCapacityValue`, `removeArea`, `removeAreaConfirm`, `removeAreaBlockedUpcoming`,
+    `removeAreaBlockedLastOne`; reworded `zoneCapacityHint`/`zoneJustFilled` for the new
+    semantics/terminology. Verified programmatically that English and Arabic still have
+    exactly matching key sets (193 keys each, no duplicates).
+  - **New shared lib files:** `lib/areas.js` (the capacity-math helpers above, used by both
+    the booking screen and the edit flow so they can't drift apart) and `lib/date.js`
+    (`toLocalDateStr`/`addDays`, deduplicated out of `app/page.js`, now also used by the
+    dashboard's delete-area upcoming-bookings check).
+  - **Tested live end-to-end**, mostly via `heldtest3@gmail.com` (confirmed it's a real
+    account in this project — an earlier claim that it existed turned out to be wrong twice
+    before the user actually created it; verified each time via both a live login attempt
+    and a direct `auth.users` query before trusting it):
+    - **Database/trigger layer**, directly via SQL and a raw unauthenticated `curl` REST
+      call (not just through the app): a 0-capacity area insert is rejected
+      (`23514`, the capacity message, fired *before* RLS since `BEFORE INSERT` triggers run
+      ahead of the `WITH CHECK` policy evaluation); inserting up to a positive capacity
+      succeeds and the next one is rejected; a different time slot for the same area still
+      succeeds (capacity is per-slot); a `declined` booking doesn't count toward capacity;
+      a `null`-capacity area allows unlimited bookings; the same anon `curl` insert against
+      an area with genuine space was correctly blocked instead by RLS's "must be the
+      authenticated owning customer" check (`42501`) — confirming the two layers are
+      independently effective. All test rows were deleted afterward.
+    - **"All areas at 0 → nothing bookable"** was verified against real production data,
+      not a fixture: the live `test 2` restaurant's three real zones had all ended up at
+      capacity `0` by migration time (apparently changed by the user between sessions) —
+      confirmed every time slot shows "Full" and every area chip is dimmed/disabled in the
+      actual app with no setup needed.
+    - **Single-area vs. multi-area UI**, in English and genuine (pre-auto-translate, fresh
+      tab each time) Arabic/RTL, against two disposable QA restaurants created and deleted
+      within this session (`QA Single Area`: one "Indoor" area, capacity 2; `QA Multi
+      Area`: Indoor/Outdoor/Garden at capacity 1/2/3) — confirmed no seating section for
+      the single-area restaurant, confirmed "Seating preference" renders with correct
+      12/28 spacing and correct RTL mirroring for the multi-area one, confirmed an area
+      fills and dims correctly after a SQL-inserted test booking.
+    - **A real signed-in booking end-to-end:** booked `QA Multi Area`'s Outdoor at 7:30 PM
+      as `heldtest3` — confirmed "Seating: Outdoor" on the confirmation screen, in My
+      Bookings, on the shareable `/booking/[id]` page, and in the database row
+      (`zone="Outdoor"`, `booking_time="7:30 PM"`). Edited it to Indoor/7:00 PM — confirmed
+      the original flipped to `status="edited"` and a new correct pending row appeared,
+      exactly like the pre-existing edit-booking mechanism always worked. Edited again to
+      "No preference" at 9:30 PM — confirmed it resolved to "Indoor" (first area with
+      space, in the restaurant's own list order) everywhere a result was checked.
+    - **Dashboard area management**, in English and genuine Arabic/RTL: add ("Rooftop",
+      left capacity blank → showed "Not tracking capacity"), rename + set capacity (renamed
+      to "Terrace", set to 4 seats), plain delete (removed cleanly), delete blocked with the
+      specific friendly message on an area with a real upcoming booking (`Garden`, via a
+      SQL-inserted test booking), and the delete button disabled client-side (confirmed a
+      click genuinely no-ops, not just styled) once down to the last remaining area. This
+      required a restaurant-owner dashboard login; rather than touch the user's own
+      restaurant or ask for its password, `heldtest3` (the same account already used for
+      customer-side testing) was made the owner of the disposable `QA Multi Area` fixture
+      via one `UPDATE restaurants SET owner_id = ...` statement the **user ran themselves**
+      after a prior attempt to run it directly was declined by the environment's own
+      auto-mode safety classifier (restaurant ownership being a sensitive field).
+    - **A real automation gotcha hit and worked around, not a code bug:** `deleteArea`'s
+      `confirm()` call (mirroring the pre-existing `deleteMenuItem` pattern elsewhere in
+      this file) froze the browser tab the first time it fired, since native dialogs block
+      Chrome's remote-debugging protocol entirely — the user had to manually click it once
+      to unfreeze the tab. Worked around for the rest of the session by patching
+      `window.confirm`/`window.alert` via injected JS after each page load, which captures
+      the message text without ever presenting a real blocking dialog. Worth knowing for
+      any future session automating this app's delete flows.
+  - **Not independently tested live:** a genuinely unconfigured (`null`-capacity) area's
+    per-area chip behavior in the inline picker (always-enabled, matching
+    `isAreaFull`'s definition) — covered by code review and the shared `lib/areas.js`
+    logic rather than a dedicated live click-through, since every live-tested fixture
+    happened to use explicit numeric capacities. The underlying function is simple and
+    directly exercised by the trigger tests above (a `null`-capacity area was proven to
+    allow unlimited bookings at the database level).
+  - **All test data cleaned up afterward:** both disposable restaurants (`QA Single Area`,
+    `QA Multi Area`, cascade-deleting their areas), every test booking created during this
+    pass, and the trigger-test rows from the SQL-level checks. `test 2`'s real (migrated)
+    data was read extensively but never modified beyond the automatic migration itself.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
   project's confirmation emails go through Resend, and Resend's free/sandbox mode will
@@ -1006,8 +1179,12 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   "Share with friends" keeps working via unguessable booking links — see the security
   bullet above for the exact policy shapes and the self-approval gap that was found and
   closed during that work
-- Capacity checking is per-zone (e.g., "5 tables in Outdoor"), NOT per-specific-table yet.
+- Capacity checking is per-area (e.g., "5 seats in Outdoor" — areas are now a freeform,
+  restaurant-managed list, see the 2026-10-13/14 bullet above), NOT per-specific-table yet.
   A real visual floor plan (named/placed individual tables) is a planned future feature.
+  "No preference" also doesn't factor party size into which area it picks — capacity has
+  always been a count of concurrent bookings per area/zone in this app, not a seats-per-
+  table match, and that didn't change with this rework.
 - No real-time notifications (SMS/WhatsApp) — restaurants only see new bookings if they're
   looking at the dashboard, or via Supabase realtime updates while the tab is open
 - Full httpOnly session isolation isn't achieved (see the session-storage security bullet

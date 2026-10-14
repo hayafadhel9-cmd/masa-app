@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Trees, Wind, Home, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
@@ -10,6 +10,100 @@ import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
 import { authErrorMessage } from "../lib/authErrorMessage";
 import { guestNameFromUser, guestPhoneFromUser } from "../lib/guestInfo";
+import { toLocalDateStr, addDays } from "../lib/date";
+import { isAreaFull, allAreasConfigured, remainingAcrossAreas, pickAvailableArea } from "../lib/areas";
+
+// Sentinel value for "let the restaurant pick any area with space" — stored
+// transiently in UI state only, never written to bookings.zone (which always
+// ends up with a concrete area name or null, never this string).
+const NO_PREFERENCE = "no_preference";
+
+// Looks up live booking counts per area for one restaurant/date/time slot and
+// resolves what `zone` a booking should actually be saved with — shared by a
+// fresh booking (confirmBooking) and an edited one (submitEditBooking) so the
+// two can't drift apart. `excludeBookingId` lets an edit ignore its own
+// original row when counting (mirrors the existing `.neq("id", ...)` pattern
+// used elsewhere for the same reason).
+async function resolveAssignedArea(restaurantId, areaList, choice, date, slot, excludeBookingId) {
+  if (areaList.length === 0) return { area: null, blocked: false };
+
+  let query = supabase
+    .from("bookings")
+    .select("zone")
+    .eq("restaurant_id", restaurantId)
+    .eq("booking_date", date)
+    .eq("booking_time", slot)
+    .in("status", ["pending", "confirmed"]);
+  if (excludeBookingId) query = query.neq("id", excludeBookingId);
+  const { data } = await query;
+  const counts = {};
+  (data || []).forEach((b) => {
+    counts[b.zone] = (counts[b.zone] || 0) + 1;
+  });
+
+  if (areaList.length === 1) {
+    const only = areaList[0];
+    return { area: only.name, blocked: isAreaFull(only, counts[only.name] || 0) };
+  }
+  if (choice === NO_PREFERENCE) {
+    const picked = pickAvailableArea(areaList, counts);
+    return { area: picked?.name ?? null, blocked: !picked };
+  }
+  const chosen = areaList.find((a) => a.name === choice);
+  if (!chosen) return { area: choice, blocked: false };
+  return { area: chosen.name, blocked: isAreaFull(chosen, counts[chosen.name] || 0) };
+}
+
+// "No preference" + one chip per area, following the same label/chip style
+// as the Booking screen's other sections. Shared by the main booking flow
+// and the edit-existing-booking flow. Renders nothing for 0 or 1 areas —
+// that case is auto-assigned with no UI, per the request.
+function SeatingPreferenceSection({ areas, availability, selected, onSelect, t }) {
+  if (!areas || areas.length < 2) return null;
+  const anyAreaHasSpace = areas.some((a) => !availability[a.name]);
+  return (
+    <>
+      <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("seatingPreference")}</label>
+      <div className="flex flex-wrap gap-2 mt-3 mb-7">
+        <button
+          type="button"
+          disabled={!anyAreaHasSpace}
+          onClick={() => onSelect(NO_PREFERENCE)}
+          className={`rounded-2xl px-4 py-2.5 text-xs font-semibold ${
+            !anyAreaHasSpace
+              ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
+              : selected === NO_PREFERENCE
+              ? "bg-burgundy text-offwhite"
+              : "bg-tan text-charcoal"
+          }`}
+        >
+          {t("noPreference")}
+        </button>
+        {areas.map((a) => {
+          const full = !!availability[a.name];
+          const isSelected = selected === a.name;
+          return (
+            <button
+              key={a.id}
+              type="button"
+              disabled={full}
+              onClick={() => onSelect(a.name)}
+              className={`rounded-2xl px-4 py-2.5 text-xs font-semibold ${
+                full
+                  ? "bg-tan/50 text-taupe opacity-60 cursor-not-allowed"
+                  : isSelected
+                  ? "bg-burgundy text-offwhite"
+                  : "bg-tan text-charcoal"
+              }`}
+            >
+              {a.name}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
 
 const RATING_GOLD = "#C9A24B";
 const RATING_TAN = "#D6CBB2";
@@ -248,28 +342,6 @@ const EDGE_FADE_STYLE = {
     "linear-gradient(to right, transparent 0, rgba(0,0,0,0.4) 12px, black 40px, black calc(100% - 40px), rgba(0,0,0,0.4) calc(100% - 12px), transparent 100%)",
 };
 
-const ZONE_ICONS = {
-  Indoor: Home,
-  Outdoor: Trees,
-  "Shisha Terrace": Wind,
-};
-
-const ZONE_KEYS = {
-  Indoor: { label: "indoor", desc: "indoorDesc" },
-  Outdoor: { label: "outdoor", desc: "outdoorDesc" },
-  "Shisha Terrace": { label: "shishaTerrace", desc: "shishaDesc" },
-};
-
-function toLocalDateStr(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function addDays(date, days) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
-
 // Real bookable dates for a restaurant's min/max advance-booking window,
 // each with a locale-correct short weekday label (not hardcoded "Su/Mo/Tu…").
 function generateDateStrip(minAdvanceDays, maxAdvanceDays, locale) {
@@ -304,14 +376,15 @@ export default function DinerPage() {
   const [party, setParty] = useState(2);
   const [time, setTime] = useState("");
   const [bookingDate, setBookingDate] = useState("");
-  const [zone, setZone] = useState(null);
+  const [areas, setAreas] = useState([]);
+  const [seatingChoice, setSeatingChoice] = useState(NO_PREFERENCE);
   const [occasion, setOccasion] = useState("None");
   const [tab, setTab] = useState("discover");
   const [myBookings, setMyBookings] = useState([]);
   const [cardNumber, setCardNumber] = useState("");
   const [lastBooking, setLastBooking] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
-  const [zoneAvailability, setZoneAvailability] = useState({});
+  const [areaAvailability, setAreaAvailability] = useState({});
   const [timeAvailability, setTimeAvailability] = useState({});
   const [bookingsView, setBookingsView] = useState("current");
   const [reviewedBookingIds, setReviewedBookingIds] = useState(new Set());
@@ -326,7 +399,7 @@ export default function DinerPage() {
   const [editTime, setEditTime] = useState("");
   const [editZone, setEditZone] = useState(null);
   const [editTimeAvailability, setEditTimeAvailability] = useState({});
-  const [editZoneAvailability, setEditZoneAvailability] = useState({});
+  const [editAreaAvailability, setEditAreaAvailability] = useState({});
 
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
@@ -465,12 +538,18 @@ export default function DinerPage() {
 
   async function openRestaurant(r) {
     setActive(r);
-    setZone((r.zones && r.zones[0]) || "Indoor");
+    setSeatingChoice(NO_PREFERENCE);
     const slots = generateTimeSlots(r.opening_time, r.closing_time);
     setTime(slots[0]);
     const defaultDate = addDays(new Date(), r.min_advance_days ?? 0);
     setBookingDate(toLocalDateStr(defaultDate));
     setParty(2);
+    const { data: areaRows } = await supabase
+      .from("restaurant_areas")
+      .select("*")
+      .eq("restaurant_id", r.id)
+      .order("created_at");
+    setAreas(areaRows || []);
     const { data } = await supabase
       .from("menu_items")
       .select("*")
@@ -486,16 +565,14 @@ export default function DinerPage() {
     setScreen("restaurant");
   }
 
-  // Real availability per time slot, aggregated across every zone — only shown
-  // when ALL of the restaurant's zones have a configured capacity. If even one
-  // zone is untracked (unlimited), we can't claim a slot is "full" overall, so
-  // we deliberately show nothing rather than a misleading partial count.
+  // Real availability per time slot, aggregated across every seating area —
+  // only shown when ALL of the restaurant's areas have a configured capacity
+  // (including an explicit 0). If even one area is untracked (null/unset
+  // capacity), we can't claim a slot is "full" overall, so we deliberately
+  // show nothing rather than a misleading partial count.
   async function loadTimeAvailability() {
     if (!active) return;
-    const zones = active.zones && active.zones.length > 0 ? active.zones : ["Indoor"];
-    const capacity = active.zone_capacity || {};
-    const allTracked = zones.every((z) => (Number(capacity[z]) || 0) > 0);
-    if (!allTracked) {
+    if (!allAreasConfigured(areas)) {
       setTimeAvailability({});
       return;
     }
@@ -512,13 +589,7 @@ export default function DinerPage() {
     });
     const availability = {};
     generateTimeSlots(active.opening_time, active.closing_time).forEach((slot) => {
-      let remaining = 0;
-      zones.forEach((z) => {
-        const cap = Number(capacity[z]) || 0;
-        const used = counts[slot]?.[z] || 0;
-        remaining += Math.max(0, cap - used);
-      });
-      availability[slot] = remaining;
+      availability[slot] = remainingAcrossAreas(areas, counts[slot] || {});
     });
     setTimeAvailability(availability);
   }
@@ -527,12 +598,13 @@ export default function DinerPage() {
     if ((screen === "restaurant" || screen === "book") && active) {
       loadTimeAvailability();
     }
-  }, [screen, active, bookingDate]);
+  }, [screen, active, areas, bookingDate]);
 
-  async function loadZoneAvailability() {
-    if (!active) return;
-    const zones = active.zones && active.zones.length > 0 ? active.zones : ["Indoor"];
-    const capacity = active.zone_capacity || {};
+  async function loadAreaAvailability() {
+    if (!active || areas.length < 2) {
+      setAreaAvailability({});
+      return;
+    }
     const { data } = await supabase
       .from("bookings")
       .select("zone")
@@ -545,18 +617,17 @@ export default function DinerPage() {
       counts[b.zone] = (counts[b.zone] || 0) + 1;
     });
     const availability = {};
-    zones.forEach((z) => {
-      const cap = Number(capacity[z]) || 0;
-      availability[z] = cap > 0 && (counts[z] || 0) >= cap;
+    areas.forEach((a) => {
+      availability[a.name] = isAreaFull(a, counts[a.name] || 0);
     });
-    setZoneAvailability(availability);
+    setAreaAvailability(availability);
   }
 
   useEffect(() => {
-    if (screen === "zone" && active) {
-      loadZoneAvailability();
+    if (screen === "book" && active) {
+      loadAreaAvailability();
     }
-  }, [screen, active, bookingDate, time]);
+  }, [screen, active, areas, bookingDate, time]);
 
   async function confirmBooking(userOverride) {
     const bookingUser = userOverride || user;
@@ -565,24 +636,19 @@ export default function DinerPage() {
       setScreen("authGate");
       return;
     }
-    const capacity = active.zone_capacity || {};
-    const cap = Number(capacity[zone]) || 0;
-    if (cap > 0) {
-      const { count } = await supabase
-        .from("bookings")
-        .select("id", { count: "exact", head: true })
-        .eq("restaurant_id", active.id)
-        .eq("booking_date", bookingDate)
-        .eq("booking_time", time)
-        .eq("zone", zone)
-        .in("status", ["pending", "confirmed"]);
-      if ((count || 0) >= cap) {
-        const zoneLabel = ZONE_KEYS[zone]?.label ? t(ZONE_KEYS[zone].label) : zone;
-        alert(t("zoneJustFilled", { zone: zoneLabel }));
-        setScreen("zone");
-        loadZoneAvailability();
-        return;
-      }
+    const { area: assignedArea, blocked } = await resolveAssignedArea(
+      active.id,
+      areas,
+      seatingChoice,
+      bookingDate,
+      time,
+      null
+    );
+    if (blocked) {
+      alert(t("zoneJustFilled", { zone: assignedArea || "" }));
+      loadAreaAvailability();
+      loadTimeAvailability();
+      return;
     }
     const { data, error } = await supabase
       .from("bookings")
@@ -592,7 +658,7 @@ export default function DinerPage() {
         guest_name: guestNameFromUser(bookingUser),
         guest_phone: guestPhoneFromUser(bookingUser),
         party_size: party,
-        zone: zone,
+        zone: assignedArea,
         occasion: occasion === "None" ? null : occasion,
         booking_time: time,
         booking_date: bookingDate,
@@ -619,7 +685,7 @@ export default function DinerPage() {
     const { data } = await supabase
       .from("bookings")
       .select(
-        "*, restaurants(name, area, cancellation_notice_hours, zones, zone_capacity, opening_time, closing_time, max_party_size)"
+        "*, restaurants(name, area, cancellation_notice_hours, opening_time, closing_time, max_party_size, restaurant_areas(id, name, capacity))"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
@@ -725,10 +791,8 @@ export default function DinerPage() {
 
   async function loadEditTimeAvailability(booking) {
     const r = booking.restaurants;
-    const zones = r.zones && r.zones.length > 0 ? r.zones : ["Indoor"];
-    const capacity = r.zone_capacity || {};
-    const allTracked = zones.every((z) => (Number(capacity[z]) || 0) > 0);
-    if (!allTracked) {
+    const editAreas = r.restaurant_areas || [];
+    if (!allAreasConfigured(editAreas)) {
       setEditTimeAvailability({});
       return;
     }
@@ -746,21 +810,18 @@ export default function DinerPage() {
     });
     const availability = {};
     generateTimeSlots(r.opening_time, r.closing_time).forEach((slot) => {
-      let remaining = 0;
-      zones.forEach((z) => {
-        const cap = Number(capacity[z]) || 0;
-        const used = counts[slot]?.[z] || 0;
-        remaining += Math.max(0, cap - used);
-      });
-      availability[slot] = remaining;
+      availability[slot] = remainingAcrossAreas(editAreas, counts[slot] || {});
     });
     setEditTimeAvailability(availability);
   }
 
-  async function loadEditZoneAvailability(booking, time) {
+  async function loadEditAreaAvailability(booking, time) {
     const r = booking.restaurants;
-    const zones = r.zones && r.zones.length > 0 ? r.zones : ["Indoor"];
-    const capacity = r.zone_capacity || {};
+    const editAreas = r.restaurant_areas || [];
+    if (editAreas.length < 2) {
+      setEditAreaAvailability({});
+      return;
+    }
     const { data } = await supabase
       .from("bookings")
       .select("zone")
@@ -774,11 +835,10 @@ export default function DinerPage() {
       counts[x.zone] = (counts[x.zone] || 0) + 1;
     });
     const availability = {};
-    zones.forEach((z) => {
-      const cap = Number(capacity[z]) || 0;
-      availability[z] = cap > 0 && (counts[z] || 0) >= cap;
+    editAreas.forEach((a) => {
+      availability[a.name] = isAreaFull(a, counts[a.name] || 0);
     });
-    setEditZoneAvailability(availability);
+    setEditAreaAvailability(availability);
   }
 
   useEffect(() => {
@@ -789,30 +849,24 @@ export default function DinerPage() {
 
   useEffect(() => {
     if (editingBooking && editTime) {
-      loadEditZoneAvailability(editingBooking, editTime);
+      loadEditAreaAvailability(editingBooking, editTime);
     }
   }, [editingBooking, editTime]);
 
   async function submitEditBooking() {
-    const r = editingBooking.restaurants;
-    const capacity = r.zone_capacity || {};
-    const cap = Number(capacity[editZone]) || 0;
-    if (cap > 0) {
-      const { count } = await supabase
-        .from("bookings")
-        .select("id", { count: "exact", head: true })
-        .eq("restaurant_id", editingBooking.restaurant_id)
-        .eq("booking_date", editingBooking.booking_date)
-        .eq("booking_time", editTime)
-        .eq("zone", editZone)
-        .in("status", ["pending", "confirmed"])
-        .neq("id", editingBooking.id);
-      if ((count || 0) >= cap) {
-        const zoneLabel = ZONE_KEYS[editZone]?.label ? t(ZONE_KEYS[editZone].label) : editZone;
-        alert(t("zoneJustFilled", { zone: zoneLabel }));
-        loadEditZoneAvailability(editingBooking, editTime);
-        return;
-      }
+    const editAreas = editingBooking.restaurants?.restaurant_areas || [];
+    const { area: assignedArea, blocked } = await resolveAssignedArea(
+      editingBooking.restaurant_id,
+      editAreas,
+      editZone,
+      editingBooking.booking_date,
+      editTime,
+      editingBooking.id
+    );
+    if (blocked) {
+      alert(t("zoneJustFilled", { zone: assignedArea || "" }));
+      loadEditAreaAvailability(editingBooking, editTime);
+      return;
     }
 
     await supabase.from("bookings").update({ status: "edited" }).eq("id", editingBooking.id);
@@ -825,7 +879,7 @@ export default function DinerPage() {
         guest_name: editingBooking.guest_name,
         guest_phone: editingBooking.guest_phone,
         party_size: editParty,
-        zone: editZone,
+        zone: assignedArea,
         occasion: editingBooking.occasion,
         booking_time: editTime,
         booking_date: editingBooking.booking_date,
@@ -1186,6 +1240,14 @@ export default function DinerPage() {
             </div>
           </div>
 
+          <SeatingPreferenceSection
+            areas={areas}
+            availability={areaAvailability}
+            selected={seatingChoice}
+            onSelect={setSeatingChoice}
+            t={t}
+          />
+
           <label className="block text-[11px] font-bold uppercase tracking-widest text-taupe">{t("celebrating")}</label>
           <div className="grid grid-cols-4 gap-2 mt-3 mb-7">
             {OCCASIONS.map((o) => {
@@ -1207,70 +1269,10 @@ export default function DinerPage() {
           </div>
 
           <button
-            onClick={() => setScreen("zone")}
+            onClick={() => setScreen("hold")}
             className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]"
           >
             {t("continueSeating")}
-          </button>
-        </div>
-      )}
-
-      {tab === "discover" && screen === "zone" && active && (
-        <div className="pt-4">
-          <button onClick={() => setScreen("book")} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
-            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
-          </button>
-          <h2 className="font-serif text-xl mt-2 text-charcoal">{t("whereSit")}</h2>
-          <div className="w-8 h-0.5 bg-brass my-3.5" />
-          <p className="text-sm mb-5 text-muted">
-            {active.name} · {bookingDate} · {party} guests · {time}
-          </p>
-
-          <div className="flex flex-col gap-3 mb-6">
-            {(active.zones && active.zones.length > 0 ? active.zones : ["Indoor"]).map((z) => {
-              const Icon = ZONE_ICONS[z] || Home;
-              const selected = zone === z;
-              const full = !!zoneAvailability[z];
-              const zk = ZONE_KEYS[z] || { label: null, desc: null };
-              return (
-                <button
-                  key={z}
-                  disabled={full}
-                  onClick={() => setZone(z)}
-                  className={`flex items-center gap-3.5 rounded-[20px] p-4 text-left shadow-[0_4px_14px_rgba(43,31,33,0.05)] border ${
-                    full
-                      ? "bg-tan/30 border-transparent opacity-55 cursor-not-allowed"
-                      : selected
-                      ? "bg-card border-brass shadow-[0_6px_18px_rgba(43,31,33,0.1)]"
-                      : "bg-card border-transparent"
-                  }`}
-                >
-                  <div
-                    className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      selected && !full ? "bg-burgundy" : "bg-tan"
-                    }`}
-                  >
-                    <Icon size={18} className={selected && !full ? "text-offwhite" : "text-burgundy"} />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-charcoal">
-                      {zk.label ? t(zk.label) : z}
-                    </div>
-                    <div className={`text-xs mt-0.5 ${full ? "text-warn font-medium" : "text-muted"}`}>
-                      {full ? t("fullyBooked") : zk.desc ? t(zk.desc) : ""}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <button
-            onClick={() => setScreen("hold")}
-            disabled={zoneAvailability[zone]}
-            className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)] disabled:opacity-50"
-          >
-            {t("continueSecure")}
           </button>
         </div>
       )}
@@ -1501,50 +1503,17 @@ export default function DinerPage() {
             )}
           </div>
 
-          <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("whereSit")}</label>
-          <div className="flex flex-col gap-3 mt-2 mb-6">
-            {(editingBooking.restaurants?.zones && editingBooking.restaurants.zones.length > 0
-              ? editingBooking.restaurants.zones
-              : ["Indoor"]
-            ).map((z) => {
-              const Icon = ZONE_ICONS[z] || Home;
-              const selected = editZone === z;
-              const full = !!editZoneAvailability[z];
-              const zk = ZONE_KEYS[z] || { label: null, desc: null };
-              return (
-                <button
-                  key={z}
-                  disabled={full}
-                  onClick={() => setEditZone(z)}
-                  className={`flex items-center gap-3.5 rounded-[20px] p-4 text-left shadow-[0_4px_14px_rgba(43,31,33,0.05)] border ${
-                    full
-                      ? "bg-tan/30 border-transparent opacity-55 cursor-not-allowed"
-                      : selected
-                      ? "bg-card border-brass shadow-[0_6px_18px_rgba(43,31,33,0.1)]"
-                      : "bg-card border-transparent"
-                  }`}
-                >
-                  <div
-                    className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      selected && !full ? "bg-burgundy" : "bg-tan"
-                    }`}
-                  >
-                    <Icon size={18} className={selected && !full ? "text-offwhite" : "text-burgundy"} />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-charcoal">{zk.label ? t(zk.label) : z}</div>
-                    <div className={`text-xs mt-0.5 ${full ? "text-warn font-medium" : "text-muted"}`}>
-                      {full ? t("fullyBooked") : zk.desc ? t(zk.desc) : ""}
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <SeatingPreferenceSection
+            areas={editingBooking.restaurants?.restaurant_areas || []}
+            availability={editAreaAvailability}
+            selected={editZone}
+            onSelect={setEditZone}
+            t={t}
+          />
 
           <button
             onClick={submitEditBooking}
-            disabled={editZoneAvailability[editZone]}
+            disabled={editZone !== NO_PREFERENCE && !!editAreaAvailability[editZone]}
             className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)] disabled:opacity-50"
           >
             {t("sendChangeRequest")}

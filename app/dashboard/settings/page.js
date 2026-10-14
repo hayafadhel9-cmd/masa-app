@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase/client";
+import { toLocalDateStr } from "../../../lib/date";
 import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 
@@ -30,12 +31,6 @@ function extractStoragePath(url) {
   return idx === -1 ? null : url.slice(idx + marker.length);
 }
 
-const ALL_ZONES = ["Indoor", "Outdoor", "Shisha Terrace"];
-const ZONE_KEYS = {
-  Indoor: "indoor",
-  Outdoor: "outdoor",
-  "Shisha Terrace": "shishaTerrace",
-};
 const PRICE_TIERS = ["$", "$$", "$$$", "$$$$"];
 
 export default function RestaurantSettingsPage() {
@@ -63,14 +58,16 @@ function RestaurantSettingsInner() {
   const [priceTier, setPriceTier] = useState("$$");
   const [noShowFee, setNoShowFee] = useState(0);
   const [noticeHours, setNoticeHours] = useState(2);
-  const [zones, setZones] = useState(["Indoor"]);
   const [openingTime, setOpeningTime] = useState("18:00");
   const [closingTime, setClosingTime] = useState("21:30");
   const [partySizes, setPartySizes] = useState([2, 4, 6, 8]);
   const [minAdvanceDays, setMinAdvanceDays] = useState(0);
   const [maxAdvanceDays, setMaxAdvanceDays] = useState(30);
   const [maxPartySize, setMaxPartySize] = useState(14);
-  const [zoneCapacity, setZoneCapacity] = useState({});
+  const [areas, setAreas] = useState([]);
+  const [newAreaName, setNewAreaName] = useState("");
+  const [newAreaCapacity, setNewAreaCapacity] = useState("");
+  const [addingArea, setAddingArea] = useState(false);
 
   const [menuItems, setMenuItems] = useState([]);
   const [newDishName, setNewDishName] = useState("");
@@ -101,14 +98,13 @@ function RestaurantSettingsInner() {
         setPriceTier(data.price_tier || "$$");
         setNoShowFee(data.no_show_fee_aed || 0);
         setNoticeHours(data.cancellation_notice_hours ?? 2);
-        setZones(data.zones && data.zones.length > 0 ? data.zones : ["Indoor"]);
         setOpeningTime(data.opening_time || "18:00");
         setClosingTime(data.closing_time || "21:30");
         setPartySizes(data.party_sizes && data.party_sizes.length > 0 ? data.party_sizes : [2, 4, 6, 8]);
         setMinAdvanceDays(data.min_advance_days ?? 0);
         setMaxAdvanceDays(data.max_advance_days ?? 30);
         setMaxPartySize(data.max_party_size ?? 14);
-        setZoneCapacity(data.zone_capacity || {});
+        await loadAreas(data.id);
       }
       setCheckingAuth(false);
     }
@@ -196,18 +192,77 @@ function RestaurantSettingsInner() {
     await loadMenuItems(restaurant.id);
   }
 
-  function toggleZone(z) {
-    setZones((prev) => (prev.includes(z) ? prev.filter((x) => x !== z) : [...prev, z]));
-  }
-
   function togglePartySize(size) {
     setPartySizes((prev) =>
       prev.includes(size) ? prev.filter((x) => x !== size) : [...prev, size].sort((a, b) => a - b)
     );
   }
 
-  function setZoneCapacityValue(zone, value) {
-    setZoneCapacity((prev) => ({ ...prev, [zone]: value }));
+  async function loadAreas(restaurantId) {
+    if (!restaurantId) return;
+    const { data } = await supabase
+      .from("restaurant_areas")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .order("created_at");
+    setAreas(data || []);
+  }
+
+  async function addArea() {
+    if (!newAreaName.trim()) return;
+    setAddingArea(true);
+    const { error } = await supabase.from("restaurant_areas").insert({
+      restaurant_id: restaurant.id,
+      name: newAreaName.trim(),
+      capacity: newAreaCapacity === "" ? null : Number(newAreaCapacity),
+    });
+    setAddingArea(false);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setNewAreaName("");
+    setNewAreaCapacity("");
+    await loadAreas(restaurant.id);
+  }
+
+  // Returns true on success so the row can leave edit mode.
+  async function saveArea(area, patch) {
+    const { error } = await supabase.from("restaurant_areas").update(patch).eq("id", area.id);
+    if (error) {
+      alert(error.message);
+      return false;
+    }
+    await loadAreas(restaurant.id);
+    return true;
+  }
+
+  async function deleteArea(area) {
+    if (areas.length <= 1) {
+      alert(t("removeAreaBlockedLastOne"));
+      return;
+    }
+    // Friendly, specific message up front — the DB trigger blocks this too
+    // (defense in depth for a raw API call), but its generic error isn't as
+    // clear as checking here first.
+    const { count } = await supabase
+      .from("bookings")
+      .select("id", { count: "exact", head: true })
+      .eq("restaurant_id", restaurant.id)
+      .eq("zone", area.name)
+      .in("status", ["pending", "confirmed"])
+      .gte("booking_date", toLocalDateStr(new Date()));
+    if ((count || 0) > 0) {
+      alert(t("removeAreaBlockedUpcoming"));
+      return;
+    }
+    if (!confirm(t("removeAreaConfirm", { name: area.name }))) return;
+    const { error } = await supabase.from("restaurant_areas").delete().eq("id", area.id);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    await loadAreas(restaurant.id);
   }
 
   async function handleSave(e) {
@@ -215,10 +270,6 @@ function RestaurantSettingsInner() {
     setSaving(true);
     setSavedMsg("");
     setSaveError(false);
-    const cleanedCapacity = {};
-    zones.forEach((z) => {
-      cleanedCapacity[z] = Number(zoneCapacity[z]) || 0;
-    });
     const payload = {
       name,
       cuisine,
@@ -226,14 +277,12 @@ function RestaurantSettingsInner() {
       price_tier: priceTier,
       no_show_fee_aed: Number(noShowFee),
       cancellation_notice_hours: Number(noticeHours),
-      zones: zones.length > 0 ? zones : ["Indoor"],
       opening_time: openingTime,
       closing_time: closingTime,
       party_sizes: partySizes.length > 0 ? partySizes : [2, 4, 6, 8],
       min_advance_days: Number(minAdvanceDays),
       max_advance_days: Number(maxAdvanceDays),
       max_party_size: Number(maxPartySize),
-      zone_capacity: cleanedCapacity,
     };
 
     let error;
@@ -251,7 +300,13 @@ function RestaurantSettingsInner() {
         .select()
         .single();
       error = insertError;
-      if (data) setRestaurant(data);
+      if (data) {
+        setRestaurant(data);
+        // A restaurant needs at least one seating area from the start —
+        // mirrors the old default of a single "Indoor" zone.
+        await supabase.from("restaurant_areas").insert({ restaurant_id: data.id, name: "Indoor", capacity: null });
+        await loadAreas(data.id);
+      }
     }
 
     setSaving(false);
@@ -434,41 +489,6 @@ function RestaurantSettingsInner() {
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("seatingAvailable")}</label>
-          <div className="flex flex-col gap-2 mt-2">
-            {ALL_ZONES.map((z) => (
-              <div
-                key={z}
-                className="flex items-center gap-2 rounded-lg px-3 py-2.5 bg-white border border-neutral-200 text-sm"
-              >
-                <label className="flex items-center gap-2 flex-1">
-                  <input
-                    type="checkbox"
-                    checked={zones.includes(z)}
-                    onChange={() => toggleZone(z)}
-                  />
-                  {t(ZONE_KEYS[z])}
-                </label>
-                {zones.includes(z) && (
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <input
-                      type="number"
-                      min="0"
-                      value={zoneCapacity[z] ?? ""}
-                      onChange={(e) => setZoneCapacityValue(z, e.target.value)}
-                      placeholder="0"
-                      className="w-16 rounded-md px-2 py-1 text-xs outline-none bg-neutral-50 border border-neutral-200 text-center"
-                    />
-                    <span className="text-[10px] text-neutral-400">{t("tablesUnit")}</span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-neutral-400 mt-1">{t("zoneCapacityHint")}</p>
-        </div>
-
-        <div>
           <label className="text-[10px] uppercase tracking-widest text-neutral-400">
             {t("noShowFeeSetting")}
           </label>
@@ -506,6 +526,46 @@ function RestaurantSettingsInner() {
           <Save size={15} /> {saving ? t("saving") : isOnboarding ? t("finishSetup") : t("saveChanges")}
         </button>
       </form>
+
+      {restaurant && (
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="font-serif text-xl text-ink mb-1">{t("seatingAvailable")}</h2>
+          <p className="text-sm text-neutral-500 mb-4">{t("zoneCapacityHint")}</p>
+
+          <div className="flex flex-col gap-2 mb-4">
+            {areas.map((a) => (
+              <AreaRow key={a.id} area={a} onSave={saveArea} onDelete={deleteArea} canDelete={areas.length > 1} t={t} />
+            ))}
+          </div>
+
+          <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                value={newAreaName}
+                onChange={(e) => setNewAreaName(e.target.value)}
+                placeholder={t("areaNamePlaceholder")}
+                className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+              />
+              <input
+                type="number"
+                min="0"
+                value={newAreaCapacity}
+                onChange={(e) => setNewAreaCapacity(e.target.value)}
+                placeholder={t("areaCapacityPlaceholder")}
+                className="w-24 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={addArea}
+              disabled={addingArea || !newAreaName.trim()}
+              className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Plus size={13} /> {addingArea ? t("adding") : t("addArea")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {restaurant && (
         <div className="mt-8 pt-6 border-t border-neutral-200">
@@ -556,6 +616,93 @@ function RestaurantSettingsInner() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function AreaRow({ area, onSave, onDelete, canDelete, t }) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(area.name);
+  const [capacity, setCapacity] = useState(area.capacity ?? "");
+  const [saving, setSaving] = useState(false);
+
+  function cancelEdit() {
+    setEditing(false);
+    setName(area.name);
+    setCapacity(area.capacity ?? "");
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = await onSave(area, {
+      name: name.trim(),
+      capacity: capacity === "" ? null : Number(capacity),
+    });
+    setSaving(false);
+    if (ok) setEditing(false);
+  }
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl p-3 bg-white border border-neutral-200">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-ink truncate">{area.name}</div>
+          <div className="text-xs text-neutral-400">
+            {area.capacity === null || area.capacity === undefined
+              ? t("areaCapacityUnset")
+              : t("areaCapacityValue", { count: area.capacity })}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink flex-shrink-0"
+        >
+          {t("edit")}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(area)}
+          aria-label={t("removeArea")}
+          disabled={!canDelete}
+          className="w-8 h-8 rounded-full flex items-center justify-center bg-red-50 text-red-600 flex-shrink-0 disabled:opacity-40"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl p-3 bg-white border border-teal">
+      <div className="flex items-center gap-2 mb-2">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+        />
+        <input
+          type="number"
+          min="0"
+          value={capacity}
+          onChange={(e) => setCapacity(e.target.value)}
+          placeholder={t("areaCapacityPlaceholder")}
+          className="w-24 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !name.trim()}
+          className="flex-1 rounded-full py-2 text-xs font-medium bg-teal text-ivory disabled:opacity-60"
+        >
+          {saving ? t("saving") : t("save")}
+        </button>
+        <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs bg-neutral-100 text-ink">
+          {t("cancel")}
+        </button>
+      </div>
     </div>
   );
 }

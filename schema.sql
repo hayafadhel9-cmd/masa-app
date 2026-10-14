@@ -12,6 +12,11 @@ create table restaurants (
   no_show_fee_aed integer default 0,   -- per guest
   subscription_status text default 'trial',  -- 'trial' | 'active' | 'cancelled'
   trial_ends_at timestamp with time zone,
+  -- zones/zone_capacity are superseded by the restaurant_areas table below
+  -- (added 2026-10-13) — left in place as inert legacy columns (same pattern
+  -- as the dead restaurant_tables table) rather than dropped. Every
+  -- restaurant's data was migrated into restaurant_areas; nothing in the app
+  -- reads or writes these two columns anymore.
   zones text[] default array['Indoor'],  -- e.g. {Indoor,Outdoor,"Shisha Terrace"}
   cancellation_notice_hours integer default 2,
   owner_id uuid references auth.users(id),  -- links a restaurant to its dashboard login
@@ -21,9 +26,28 @@ create table restaurants (
   min_advance_days integer default 0,
   max_advance_days integer default 30,
   max_party_size integer default 14,
-  zone_capacity jsonb default '{}'::jsonb,  -- e.g. {"Indoor": 5, "Outdoor": 3} — table count per zone
+  zone_capacity jsonb default '{}'::jsonb,  -- superseded, see note above
   created_at timestamp with time zone default now()
 );
+
+-- A restaurant's freeform, owner-managed list of seating areas (added
+-- 2026-10-13, replacing the old fixed Indoor/Outdoor/Shisha Terrace set).
+-- bookings.zone stores the area's NAME as a plain text snapshot, not a
+-- foreign key — renaming or deleting an area later never changes what a
+-- past booking shows.
+create table restaurant_areas (
+  id uuid primary key default uuid_generate_v4(),
+  restaurant_id uuid not null references restaurants(id) on delete cascade,
+  name text not null,
+  -- null = not configured (unlimited, same as today's existing behavior);
+  -- 0 = configured with zero seats (nothing bookable in this area);
+  -- >0 = seat/table count enforced against concurrent pending+confirmed bookings.
+  capacity integer,
+  created_at timestamp with time zone default now(),
+  unique (restaurant_id, name)
+);
+
+create index idx_restaurant_areas_restaurant on restaurant_areas(restaurant_id);
 
 -- Tables on the floor for each restaurant
 create table restaurant_tables (
@@ -53,7 +77,9 @@ create table bookings (
   guest_name text not null,
   guest_phone text not null,
   party_size integer not null,
-  zone text,                      -- e.g. "Indoor" | "Outdoor" | "Shisha Terrace"
+  zone text,                      -- the assigned restaurant_areas.name at booking time, e.g.
+                                   -- "Indoor" — a plain text snapshot, not a foreign key, so
+                                   -- renaming/deleting that area later never changes this row
   occasion text,                  -- e.g. "Birthday" | "Anniversary" | "Business" | null
   booking_time text not null,     -- e.g. "7:30 PM" (swap to a real timestamp for production)
   booking_date date not null default current_date,
@@ -252,3 +278,137 @@ create policy "Owners can delete menu photos for their restaurant"
       and restaurants.owner_id = auth.uid()
     )
   );
+
+-- restaurant_areas RLS (added 2026-10-13 alongside the seating-areas rework).
+alter table restaurant_areas enable row level security;
+
+create policy "Public can view restaurant areas"
+  on restaurant_areas for select
+  using (true);
+
+create policy "Owners can insert their own areas"
+  on restaurant_areas for insert
+  with check (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = restaurant_areas.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can update their own areas"
+  on restaurant_areas for update
+  using (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = restaurant_areas.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = restaurant_areas.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+create policy "Owners can delete their own areas"
+  on restaurant_areas for delete
+  using (
+    exists (
+      select 1 from restaurants
+      where restaurants.id = restaurant_areas.restaurant_id
+      and restaurants.owner_id = auth.uid()
+    )
+  );
+
+-- Server-side seating-capacity enforcement (added 2026-10-13) — defense in
+-- depth so a raw API/SQL insert is rejected too, not just blocked by the
+-- app's own client-side pre-insert check. Scoped to INSERT only: every write
+-- path that creates a new pending/confirmed booking (a fresh booking, or an
+-- edit, which inserts a replacement row) goes through INSERT; no existing
+-- code path flips an UPDATE from a non-counted status back into
+-- pending/confirmed, so UPDATE doesn't need the same guard today.
+create or replace function enforce_booking_capacity()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  area_capacity integer;
+  current_count integer;
+begin
+  if new.status not in ('pending', 'confirmed') then
+    return new;
+  end if;
+  if new.zone is null then
+    return new;
+  end if;
+
+  select capacity into area_capacity
+  from restaurant_areas
+  where restaurant_id = new.restaurant_id and name = new.zone;
+
+  -- No matching area row, or capacity not configured (null) -> unlimited,
+  -- same as today's existing behavior for an untracked zone.
+  if area_capacity is null then
+    return new;
+  end if;
+
+  select count(*) into current_count
+  from bookings
+  where restaurant_id = new.restaurant_id
+    and booking_date = new.booking_date
+    and booking_time = new.booking_time
+    and zone = new.zone
+    and status in ('pending', 'confirmed');
+
+  if current_count >= area_capacity then
+    raise exception 'This seating area is fully booked for the selected time.'
+      using errcode = '23514';
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_enforce_booking_capacity
+before insert on bookings
+for each row execute function enforce_booking_capacity();
+
+-- Blocks removing a seating area that still has upcoming pending/confirmed
+-- bookings, and blocks removing a restaurant's last remaining area —
+-- defense in depth behind the dashboard's own pre-delete checks (which give
+-- the friendlier, specific UI message before ever reaching this trigger).
+create or replace function prevent_unsafe_area_delete()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (
+    select 1 from bookings
+    where restaurant_id = old.restaurant_id
+      and zone = old.name
+      and status in ('pending', 'confirmed')
+      and booking_date >= current_date
+  ) then
+    raise exception 'This area has upcoming bookings and cannot be removed.'
+      using errcode = '23514';
+  end if;
+
+  if (select count(*) from restaurant_areas where restaurant_id = old.restaurant_id) <= 1 then
+    raise exception 'A restaurant must have at least one seating area.'
+      using errcode = '23514';
+  end if;
+
+  return old;
+end;
+$$;
+
+create trigger trg_prevent_unsafe_area_delete
+before delete on restaurant_areas
+for each row execute function prevent_unsafe_area_delete();
