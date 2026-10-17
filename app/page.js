@@ -1286,19 +1286,17 @@ export default function DinerPage() {
             <ShieldCheck size={18} className="text-burgundy" />
             <h2 className="font-serif text-xl text-charcoal">{t("secureTable")}</h2>
           </div>
-          <p className="text-sm mb-5 text-muted">
-            {active.name} {active.no_show_fee_aed > 0 ? t("holdsTable") : t("holdsTableNoCard")}
-          </p>
-
           {active.no_show_fee_aed > 0 && (
-            <div className="rounded-2xl p-4 mb-6 flex items-start gap-3 bg-card border border-brass/40">
-              <AlertTriangle size={16} className="text-brass mt-0.5 flex-shrink-0" />
-              <div className="text-xs text-charcoal">
-                <span className="font-semibold">
-                  {t("noShowFeeLabel", { fee: active.no_show_fee_aed })}
-                </span>{" "}
-                <span className="text-muted">{t("freeCancelLabel", { hours: active.cancellation_notice_hours ?? 2 })}</span>
-              </div>
+            <div className="mb-6">
+              <p className="text-xs text-taupe">
+                {t("noShowFeeLine", { fee: active.no_show_fee_aed })}
+              </p>
+              <p className="text-xs text-taupe">
+                {t("freeCancelLine", {
+                  hours: active.cancellation_notice_hours ?? 2,
+                  unit: (active.cancellation_notice_hours ?? 2) === 1 ? t("hourSingular") : t("hourPlural"),
+                })}
+              </p>
             </div>
           )}
 

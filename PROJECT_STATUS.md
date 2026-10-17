@@ -1151,6 +1151,33 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     pass, and the trigger-test rows from the SQL-level checks. `test 2`'s real (migrated)
     data was read extensively but never modified beyond the automatic migration itself.
 
+- **No-show fee disclosure simplified to plain text (2026-10-17):** on the Booking screen's
+  "Secure your table" step, the bordered card box (AlertTriangle icon + bolded fee line +
+  muted cancellation line) and the separate subtitle line ("*Restaurant* holds this table
+  for you. A card is required…" / "…No card required…") are both gone, replaced by two
+  lines of plain small grey text (`text-xs text-taupe`, no box, no border): "No-show fee:
+  AED {fee} per guest" and "Free cancellation up to {hours} {hour/hours} before your
+  reservation" — singular "1 hour" vs. plural "N hours" chosen in `app/page.js` based on
+  `active.cancellation_notice_hours`. Both lines are still gated on the same
+  `active.no_show_fee_aed > 0` condition the old box/subtitle already used (unchanged —
+  this is the same check verified correct for the fee=0 case in the 2026-08-29 bug-fix
+  entry above), so a restaurant with no no-show fee shows neither line, exactly as before
+  just with nothing in that spot now rather than a "no card required" subtitle. Nothing
+  else on the screen (card number field, confirm button, Stripe disclaimer paragraph) was
+  touched. Removed the four now-unused translation keys this replaced (`holdsTable`,
+  `holdsTableNoCard`, `noShowFeeLabel`, `freeCancelLabel`) and added `noShowFeeLine`,
+  `freeCancelLine`, `hourSingular`, `hourPlural` in both locales — verified EN/AR key
+  parity programmatically (193 keys each, no duplicates) same as always. **Tested live**
+  against the real `test 2` restaurant, which conveniently has `no_show_fee_aed = 70` and
+  `cancellation_notice_hours = 1` — confirmed "No-show fee: AED 70 per guest" / "Free
+  cancellation up to 1 hour before your reservation" (singular, real data, no fixture
+  needed) in English, and the correctly right-aligned Arabic equivalent ("رسوم عدم الحضور:
+  70 درهم لكل ضيف" / "يمكن الإلغاء مجانًا حتى 1 ساعة قبل موعد حجزك") in genuine
+  (pre-auto-translate) Arabic/RTL — both lines flow right-aligned under `dir="rtl"` with no
+  explicit alignment override needed, consistent with how the rest of this screen already
+  handles RTL. No test booking was created (reached the "Secure your table" screen to
+  inspect the text without submitting).
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
   project's confirmation emails go through Resend, and Resend's free/sandbox mode will
