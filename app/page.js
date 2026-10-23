@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star, Plus, Accessibility, Baby } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star, Plus, Accessibility, Baby, Nut } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import {
   emptyDiningNeeds,
@@ -112,42 +112,20 @@ function SeatingPreferenceSection({ areas, availability, selected, onSelect, t }
   );
 }
 
-// Lucide has no dedicated "allergy" icon, so this reuses the exact mark from
-// the Held guest-needs design file (a cluster of overlapping allergen drops)
-// rather than reaching for an unrelated stand-in like a wheat stalk.
-function AllergyIcon({ size = 16, className }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M2 22 16 8" />
-      <path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z" />
-    </svg>
-  );
-}
-
 const NEED_DEFS = [
   { key: "wheelchair", labelKey: "wheelchairAccess", Icon: Accessibility },
   { key: "highChair", labelKey: "highChairNeed", Icon: Baby },
-  { key: "allergy", labelKey: "allergyNeed", Icon: AllergyIcon },
+  { key: "allergy", labelKey: "allergyNeed", Icon: Nut },
 ];
 
 // The three dining-needs chips + conditional allergy text field, shared by
 // the Booking screen's collapsible row and the Account screen's saved
 // defaults. `needs` is the { wheelchair, highChair, allergyOn, allergy }
 // shape from lib/diningNeeds.js; `onToggle` flips one chip, `onAllergyChange`
-// updates the free-text field.
+// updates the free-text field. Icon leads the label in every chip; unselected
+// is burgundy-on-tan (the app's cream-family neutral surface), selected
+// flips to cream-on-burgundy — both the icon and label share that color via
+// currentColor, so the icon never looks disconnected from its own chip.
 function DiningNeedsFields({ needs, onToggle, onAllergyChange, t, allergyInputRef }) {
   return (
     <>
@@ -161,7 +139,7 @@ function DiningNeedsFields({ needs, onToggle, onAllergyChange, t, allergyInputRe
               onClick={() => onToggle(key)}
               aria-pressed={on}
               className={`inline-flex items-center gap-2 rounded-full px-4 min-h-[44px] text-xs font-semibold ${
-                on ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                on ? "bg-burgundy text-offwhite" : "bg-tan text-burgundy"
               }`}
             >
               <Icon size={16} />
@@ -1453,9 +1431,16 @@ export default function DinerPage() {
                 <span className="font-semibold text-charcoal">{t("diningNeedsPrompt")}</span>{" "}
                 <span className="text-muted">{t("optionalLabel")}</span>
               </span>
-              {!needsOpen && diningNeedsSummary(bookNeeds, t, lang) && (
-                <span className="ms-auto text-xs text-muted text-end max-w-[45%] truncate">
-                  {diningNeedsSummary(bookNeeds, t, lang)}
+              {!needsOpen && hasDiningNeeds(bookNeeds) && (
+                <span className="ms-auto flex items-center gap-1.5 max-w-[55%]">
+                  <span className="flex items-center gap-1 text-burgundy flex-shrink-0">
+                    {bookNeeds.wheelchair && <Accessibility size={16} />}
+                    {bookNeeds.highChair && <Baby size={16} />}
+                    {bookNeeds.allergyOn && <Nut size={16} />}
+                  </span>
+                  <span className="text-xs text-muted text-end truncate">
+                    {diningNeedsSummary(bookNeeds, t, lang)}
+                  </span>
                 </span>
               )}
             </button>

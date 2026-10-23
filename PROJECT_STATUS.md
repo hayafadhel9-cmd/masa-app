@@ -1504,6 +1504,51 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     Booking screen, not by clicking through them live — worth a real click-through next
     time either login is available.
 
+- **Dining-needs icons made more visually distinct + swapped to a real lucide allergy
+  icon (2026-10-24):** follow-up to the 2026-10-23 feature above, in both `app/page.js`
+  and `app/dashboard/page.js`.
+  - **Custom `AllergyIcon` SVG replaced with lucide-react's `Nut`** everywhere it
+    appeared (Booking screen chip, Account screen chip, dashboard badge, dashboard detail
+    modal) — removed the hand-written SVG component from both files entirely rather than
+    leaving it as unused dead code. `Accessibility` (wheelchair) and `Baby` (high chair)
+    were already lucide and unchanged.
+  - **Chip color on the Booking/Account screens** changed from `text-charcoal` to
+    `text-burgundy` for the unselected state (icon and label share it via `currentColor`,
+    same mechanism as before) — bg stays `bg-tan` (the app's cream-family neutral
+    surface) unselected, `bg-burgundy text-offwhite` selected, unchanged. Reads as
+    "burgundy on cream, cream on burgundy when selected" without introducing a literal
+    `bg-cream` pill, which would have had near-zero contrast against the screen's own
+    `bg-cream` page background.
+  - **Dashboard icons** recolored from `text-teal` to `text-burgundy` and bumped from
+    13px/15px to a uniform 16px (badge next to the guest's name, and the detail modal) —
+    a deliberate accent against the dashboard's own teal/ivory palette, chosen so the
+    three icons mean the same thing and look the same color on both sides of a booking.
+    Already showed on every booking card (Needs Response/pending, Confirmed, and all
+    three History sections — dined/no-show/cancelled) before this change; this pass was
+    colors and size only, not new placement.
+  - **Booking screen's collapsed summary line now also shows the selected icons**, not
+    just the grey text — small burgundy 16px icons (only the ones actually selected)
+    lead the truncated summary text on the line's trailing side, same spot the text-only
+    summary occupied before.
+  - **Tested live, both English and Arabic:** `next build` clean, then `npm run dev` +
+    a real browser for the Booking screen (expand chips, select all three, confirm
+    burgundy-on-tan unselected / offwhite-on-burgundy selected with the new `Nut` icon,
+    collapse and confirm the icon row + grey summary together, repeated in Arabic/RTL —
+    icons and summary swap to the correct mirrored side, chip order reverses, `Nut`
+    renders correctly in the RTL chip too). For the dashboard side (still no
+    restaurant-owner login available this session — same gap noted in the 2026-10-23
+    entry above), reused the project's established pattern from the 2026-10-23
+    `ConfirmSheet` entry: a temporary throwaway route outside `/dashboard` (so
+    middleware's auth gate didn't apply) rendering the real `NeedsIcons` component and
+    detail-modal JSX against fabricated bookings covering all three icon combinations,
+    one per tab's card style (amber/Needs Response, green/Confirmed, neutral/History) —
+    confirmed the 16px burgundy icons, the "no needs → no icons" case, and the modal
+    (title, guest name, each need spelled out, "Allergy: tree nuts") in both English and
+    RTL Arabic. Deleted the throwaway route before committing and re-ran `next build`
+    clean, confirming nothing referenced it — this is now a verified visual match, not
+    just a code-review inference, though it's still not a real end-to-end click-through
+    with an actual restaurant-owner session.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
   fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)

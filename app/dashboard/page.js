@@ -3,39 +3,18 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase/client";
-import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe, Accessibility, Baby } from "lucide-react";
+import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe, Accessibility, Baby, Nut } from "lucide-react";
 import { useLanguage } from "../../lib/LanguageContext";
 import { hasDiningNeeds, diningNeedsFromRow } from "../../lib/diningNeeds";
 
-// Lucide has no dedicated "allergy" icon — reuses the exact mark from the
-// Held guest-needs design file, same as the diner-facing app (app/page.js),
-// so the icon means the same thing on both sides of the booking.
-function AllergyIcon({ size = 16, className }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-    >
-      <path d="M2 22 16 8" />
-      <path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
-      <path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z" />
-    </svg>
-  );
-}
-
-// Small tappable icon row shown next to a guest's name on the dashboard, one
-// icon per active need — empty (renders nothing) when the booking has none.
-// Tapping opens the detail popover via `onOpen`, which is how the allergy
-// free-text gets surfaced (the icons alone are deliberately unlabeled).
+// Small tappable icon row shown next to a guest's name on every booking card
+// (Needs Response, Confirmed, and all three History sections) — one icon per
+// active need, burgundy at 16px, empty (renders nothing) when the booking
+// has none. Tapping opens the detail popover via `onOpen`, which is how the
+// allergy free-text gets surfaced (the icons alone are deliberately
+// unlabeled). Burgundy is a deliberate accent against the dashboard's own
+// teal/ivory palette — it's the same color the diner app uses for these same
+// three icons, so the icon identity reads the same on both sides.
 function NeedsIcons({ booking, onOpen, label }) {
   const needs = diningNeedsFromRow(booking.booking_needs?.[0]);
   if (!hasDiningNeeds(needs)) return null;
@@ -46,12 +25,12 @@ function NeedsIcons({ booking, onOpen, label }) {
         e.stopPropagation();
         onOpen(booking, needs);
       }}
-      className="inline-flex items-center gap-1 text-teal flex-shrink-0"
+      className="inline-flex items-center gap-1 text-burgundy flex-shrink-0"
       aria-label={label}
     >
-      {needs.wheelchair && <Accessibility size={13} />}
-      {needs.highChair && <Baby size={13} />}
-      {needs.allergyOn && <AllergyIcon size={13} />}
+      {needs.wheelchair && <Accessibility size={16} />}
+      {needs.highChair && <Baby size={16} />}
+      {needs.allergyOn && <Nut size={16} />}
     </button>
   );
 }
@@ -480,17 +459,17 @@ export default function DashboardPage() {
             <div className="flex flex-col gap-2.5 text-sm text-ink">
               {needsDetail.needs.wheelchair && (
                 <div className="flex items-center gap-2">
-                  <Accessibility size={15} className="text-teal flex-shrink-0" /> {t("wheelchairAccess")}
+                  <Accessibility size={16} className="text-burgundy flex-shrink-0" /> {t("wheelchairAccess")}
                 </div>
               )}
               {needsDetail.needs.highChair && (
                 <div className="flex items-center gap-2">
-                  <Baby size={15} className="text-teal flex-shrink-0" /> {t("highChairNeed")}
+                  <Baby size={16} className="text-burgundy flex-shrink-0" /> {t("highChairNeed")}
                 </div>
               )}
               {needsDetail.needs.allergyOn && (
                 <div className="flex items-start gap-2">
-                  <AllergyIcon size={15} className="text-teal flex-shrink-0 mt-0.5" />
+                  <Nut size={16} className="text-burgundy flex-shrink-0 mt-0.5" />
                   <span>
                     {t("allergyNeed")}
                     {needsDetail.needs.allergy ? `: ${needsDetail.needs.allergy}` : ""}
