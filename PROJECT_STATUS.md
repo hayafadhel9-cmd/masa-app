@@ -1549,6 +1549,59 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     just a code-review inference, though it's still not a real end-to-end click-through
     with an actual restaurant-owner session.
 
+- **Bug fix — dining-needs icons never showed anywhere, including My Bookings
+  (2026-10-24):** the user reported icons missing from My Bookings and asked whether
+  needs were actually being saved at all.
+  - **Cause, in one sentence:** every call site read the embedded `booking_needs` as an
+    array (`booking.booking_needs?.[0]`), but because `booking_needs.booking_id` is that
+    table's own primary key, PostgREST treats bookings→booking_needs as a to-one
+    relationship and always returns a single object (or `null`) — so `?.[0]` was always
+    `undefined`, every icon silently evaluated to "no needs," and this affected the
+    dashboard and the edit-booking needs-carryover from the moment both shipped
+    (2026-10-23), not just My Bookings (which simply never had icons added at all — a
+    separate, plain gap, not a bug).
+  - **Needs ARE actually saved on the booking when it's made** — checked directly against
+    the live project before changing anything: `booking_needs` already had 2 real rows
+    from the user's own prior testing (a wheelchair-only and a high-chair-only booking,
+    both under her own account), and a direct RLS-simulated read as the restaurant
+    owner (`set local role authenticated; set local request.jwt.claims...`, read-only,
+    rolled back) confirmed the owner can already see that data — the save path and its
+    RLS were never the problem. Confirmed the actual response shape with a real
+    unauthenticated REST call against the live project
+    (`GET /bookings?select=id,guest_name,booking_needs(*)`), which came back
+    `"booking_needs":null` for a single-booking id filter — conclusive proof of the
+    to-one shape, not a guess from reading PostgREST's docs.
+  - **Fixed in two places:** `app/dashboard/page.js`'s `NeedsIcons` (`booking.booking_needs`
+    instead of `?.[0]`) and `app/page.js`'s `submitEditBooking` (same fix, for the
+    edit-booking needs-carryover added 2026-10-23). Both now carry a comment explaining
+    why, to stop this regressing.
+  - **My Bookings icons added** (the actual, separate gap): both the Current and Past
+    tabs now show the same three icons (`Accessibility`/`Baby`/`Nut`, burgundy, 16px)
+    next to the restaurant name on any booking card with needs, reusing
+    `lib/diningNeeds.js`'s helpers. Tapping opens a new `NeedsDetailModal` — same visual
+    language as the app's other modals (`RatingPromptModal`'s `bg-cream`/rounded/centered
+    pattern), not the existing `ConfirmSheet` (that one's shape is confirm/cancel, not an
+    info display) — showing each active need and the allergy text. New state:
+    `needsDetail` in `DinerPage`.
+  - **Tested with a new, real booking carrying all three needs** (wheelchair, high chair,
+    allergy "tree nuts"), inserted directly against the live project under the user's own
+    existing diner identity (the same account already behind her 2 prior test bookings,
+    which is also this restaurant's own owner account) — a real UI click-through wasn't
+    possible this session: `signInAnonymously()` is disabled on this project, and
+    `signUp()` with a fresh email hits the already-documented, pre-existing Resend
+    sandbox-mode limitation (any email but the account owner's own gets a 500 with no
+    user created — see "Resend is still in sandbox mode" below), so a brand-new confirmed
+    diner account can't be created in-session. Visually verified the fix against this
+    real row (plus the 2 pre-existing real rows) via the same throwaway-route technique
+    as the 2026-10-23 entry above: all three icons render on both a My-Bookings-style
+    card and a dashboard-style card, tapping opens the correct modal with "Allergy: tree
+    nuts," and both mirror correctly in Arabic/RTL. The throwaway route, and a temporary
+    one-line QA hook added to `lib/supabase/client.js` to drive the live project's auth
+    from the browser console during investigation, were both removed before committing
+    (`git status` confirms `lib/supabase/client.js` has no diff). The test booking itself
+    was deleted from the live project afterward (`booking_needs` cascaded with it) —
+    confirmed 0 rows remain for that id.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
   fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)

@@ -16,7 +16,12 @@ import { hasDiningNeeds, diningNeedsFromRow } from "../../lib/diningNeeds";
 // teal/ivory palette — it's the same color the diner app uses for these same
 // three icons, so the icon identity reads the same on both sides.
 function NeedsIcons({ booking, onOpen, label }) {
-  const needs = diningNeedsFromRow(booking.booking_needs?.[0]);
+  // `booking_needs.booking_id` is this table's primary key, so PostgREST
+  // treats bookings -> booking_needs as a to-one embed: the API returns a
+  // single object (or null), never an array — `?.[0]` here would always be
+  // undefined and silently hide every icon, which is exactly the bug this
+  // comment is guarding against regressing.
+  const needs = diningNeedsFromRow(booking.booking_needs);
   if (!hasDiningNeeds(needs)) return null;
   return (
     <button

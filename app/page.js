@@ -9,6 +9,7 @@ import {
   hasDiningNeeds,
   diningNeedsSummary,
   diningNeedsRowForInsert,
+  diningNeedsFromRow,
 } from "../lib/diningNeeds";
 import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
@@ -160,6 +161,79 @@ function DiningNeedsFields({ needs, onToggle, onAllergyChange, t, allergyInputRe
         />
       )}
     </>
+  );
+}
+
+// Small tappable icon row shown on a My Bookings card — one icon per active
+// need, burgundy at 16px, nothing rendered when the booking has none.
+// Tapping opens the detail modal via `onOpen`, which is how the allergy
+// free-text gets surfaced. `booking.booking_needs` is a single object or
+// null here, not an array — `booking_needs.booking_id` is that table's
+// primary key, so PostgREST embeds it as a to-one relation (see the matching
+// note in app/dashboard/page.js's NeedsIcons).
+function BookingNeedsIcons({ booking, onOpen }) {
+  const needs = diningNeedsFromRow(booking.booking_needs);
+  if (!hasDiningNeeds(needs)) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen(booking, needs);
+      }}
+      className="inline-flex items-center gap-1 text-burgundy flex-shrink-0"
+      aria-label="Dining needs"
+    >
+      {needs.wheelchair && <Accessibility size={16} />}
+      {needs.highChair && <Baby size={16} />}
+      {needs.allergyOn && <Nut size={16} />}
+    </button>
+  );
+}
+
+function NeedsDetailModal({ detail, onClose, t }) {
+  if (!detail) return null;
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-charcoal/50 flex items-center justify-center px-5"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-[20px] p-5 bg-cream shadow-[0_8px_30px_rgba(43,31,33,0.25)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="font-serif text-xl text-charcoal mb-1">{t("diningNeeds")}</h3>
+        <p className="text-xs text-muted mb-4">{detail.booking.restaurants?.name}</p>
+        <div className="flex flex-col gap-2.5 text-sm text-charcoal mb-5">
+          {detail.needs.wheelchair && (
+            <div className="flex items-center gap-2">
+              <Accessibility size={16} className="text-burgundy flex-shrink-0" /> {t("wheelchairAccess")}
+            </div>
+          )}
+          {detail.needs.highChair && (
+            <div className="flex items-center gap-2">
+              <Baby size={16} className="text-burgundy flex-shrink-0" /> {t("highChairNeed")}
+            </div>
+          )}
+          {detail.needs.allergyOn && (
+            <div className="flex items-start gap-2">
+              <Nut size={16} className="text-burgundy flex-shrink-0 mt-0.5" />
+              <span>
+                {t("allergyNeed")}
+                {detail.needs.allergy ? `: ${detail.needs.allergy}` : ""}
+              </span>
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full text-center text-sm font-medium text-burgundy py-2"
+        >
+          {t("back")}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -485,6 +559,7 @@ export default function DinerPage() {
   const [accountNeeds, setAccountNeeds] = useState(emptyDiningNeeds());
   const [savingAccountNeeds, setSavingAccountNeeds] = useState(false);
   const [accountNeedsSaved, setAccountNeedsSaved] = useState(false);
+  const [needsDetail, setNeedsDetail] = useState(null); // { booking, needs } | null, for My Bookings
   const allergyInputRef = useRef(null);
 
   useEffect(() => {
@@ -1024,7 +1099,10 @@ export default function DinerPage() {
       return;
     }
 
-    const existingNeeds = editingBooking.booking_needs?.[0];
+    // `booking_needs.booking_id` is that table's primary key, so PostgREST
+    // embeds it as a single object (or null), not an array — see the same
+    // note on NeedsIcons in app/dashboard/page.js.
+    const existingNeeds = editingBooking.booking_needs;
     if (existingNeeds) {
       const { error: needsError } = await supabase.from("booking_needs").insert({
         booking_id: data.id,
@@ -1798,7 +1876,10 @@ export default function DinerPage() {
               return (
                 <div key={b.id} className="rounded-[20px] p-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)]">
                   <div className="flex items-start justify-between mb-2">
-                    <div className="font-serif text-lg text-charcoal">{b.restaurants?.name}</div>
+                    <div className="font-serif text-lg text-charcoal flex items-center gap-2">
+                      {b.restaurants?.name}
+                      <BookingNeedsIcons booking={b} onOpen={(booking, needs) => setNeedsDetail({ booking, needs })} />
+                    </div>
                     {b.occasion && (
                       <span className="text-[10px] font-medium rounded-full px-2.5 py-1 border border-brass text-brass">
                         {b.occasion}
@@ -2106,6 +2187,7 @@ export default function DinerPage() {
           t={t}
         />
       )}
+      <NeedsDetailModal detail={needsDetail} onClose={() => setNeedsDetail(null)} t={t} />
     </div>
   );
 }
