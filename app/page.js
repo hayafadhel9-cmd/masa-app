@@ -2,8 +2,14 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star, Plus, Accessibility, Baby } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
+import {
+  emptyDiningNeeds,
+  hasDiningNeeds,
+  diningNeedsSummary,
+  diningNeedsRowForInsert,
+} from "../lib/diningNeeds";
 import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../lib/timeSlots";
 import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
@@ -102,6 +108,79 @@ function SeatingPreferenceSection({ areas, availability, selected, onSelect, t }
           );
         })}
       </div>
+    </>
+  );
+}
+
+// Lucide has no dedicated "allergy" icon, so this reuses the exact mark from
+// the Held guest-needs design file (a cluster of overlapping allergen drops)
+// rather than reaching for an unrelated stand-in like a wheat stalk.
+function AllergyIcon({ size = 16, className }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M2 22 16 8" />
+      <path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z" />
+    </svg>
+  );
+}
+
+const NEED_DEFS = [
+  { key: "wheelchair", labelKey: "wheelchairAccess", Icon: Accessibility },
+  { key: "highChair", labelKey: "highChairNeed", Icon: Baby },
+  { key: "allergy", labelKey: "allergyNeed", Icon: AllergyIcon },
+];
+
+// The three dining-needs chips + conditional allergy text field, shared by
+// the Booking screen's collapsible row and the Account screen's saved
+// defaults. `needs` is the { wheelchair, highChair, allergyOn, allergy }
+// shape from lib/diningNeeds.js; `onToggle` flips one chip, `onAllergyChange`
+// updates the free-text field.
+function DiningNeedsFields({ needs, onToggle, onAllergyChange, t, allergyInputRef }) {
+  return (
+    <>
+      <div className="flex flex-wrap gap-2">
+        {NEED_DEFS.map(({ key, labelKey, Icon }) => {
+          const on = key === "allergy" ? needs.allergyOn : needs[key];
+          return (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onToggle(key)}
+              aria-pressed={on}
+              className={`inline-flex items-center gap-2 rounded-full px-4 min-h-[44px] text-xs font-semibold ${
+                on ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+              }`}
+            >
+              <Icon size={16} />
+              {t(labelKey)}
+            </button>
+          );
+        })}
+      </div>
+      {needs.allergyOn && (
+        <input
+          ref={allergyInputRef}
+          value={needs.allergy}
+          onChange={(e) => onAllergyChange(e.target.value)}
+          placeholder={t("allergyPlaceholder")}
+          maxLength={60}
+          dir="auto"
+          className="w-full rounded-full px-4 py-3 text-sm mt-3 outline-none bg-tan text-charcoal placeholder:text-taupe"
+        />
+      )}
     </>
   );
 }
@@ -421,7 +500,14 @@ export default function DinerPage() {
   const [accountFullName, setAccountFullName] = useState("");
   const [savingAccountInfo, setSavingAccountInfo] = useState(false);
   const [accountInfoSaved, setAccountInfoSaved] = useState(false);
-  const [accountView, setAccountView] = useState("main"); // "main" | "info" | "payment"
+  const [accountView, setAccountView] = useState("main"); // "main" | "info" | "payment" | "needs"
+  const [bookNeeds, setBookNeeds] = useState(emptyDiningNeeds());
+  const [needsOpen, setNeedsOpen] = useState(false);
+  const [needsFromAccount, setNeedsFromAccount] = useState(false);
+  const [accountNeeds, setAccountNeeds] = useState(emptyDiningNeeds());
+  const [savingAccountNeeds, setSavingAccountNeeds] = useState(false);
+  const [accountNeedsSaved, setAccountNeedsSaved] = useState(false);
+  const allergyInputRef = useRef(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setUser(data.user || null));
@@ -435,7 +521,45 @@ export default function DinerPage() {
     setReservationName(user?.user_metadata?.reservation_name || "");
     setAccountPhone(user?.user_metadata?.phone || "");
     setAccountFullName(user?.user_metadata?.full_name || "");
+    setAccountNeeds({ ...emptyDiningNeeds(), ...(user?.user_metadata?.dining_needs || {}) });
   }, [user]);
+
+  async function handleSaveAccountNeeds() {
+    setSavingAccountNeeds(true);
+    setAccountNeedsSaved(false);
+    const { error } = await supabase.auth.updateUser({ data: { dining_needs: accountNeeds } });
+    setSavingAccountNeeds(false);
+    if (error) {
+      console.error("Saving dining needs failed:", error.message);
+      alert(authErrorMessage(error, t));
+      return;
+    }
+    setAccountNeedsSaved(true);
+  }
+
+  function toggleAccountNeed(key) {
+    setAccountNeedsSaved(false);
+    setAccountNeeds((prev) => ({ ...prev, [key === "allergy" ? "allergyOn" : key]: !prev[key === "allergy" ? "allergyOn" : key] }));
+  }
+
+  function setAccountAllergyText(text) {
+    setAccountNeedsSaved(false);
+    setAccountNeeds((prev) => ({ ...prev, allergy: text }));
+  }
+
+  function toggleBookNeed(key) {
+    const stateKey = key === "allergy" ? "allergyOn" : key;
+    setBookNeeds((prev) => ({ ...prev, [stateKey]: !prev[stateKey] }));
+    setNeedsFromAccount(false);
+    if (key === "allergy") {
+      requestAnimationFrame(() => allergyInputRef.current?.focus());
+    }
+  }
+
+  function setBookAllergyText(text) {
+    setBookNeeds((prev) => ({ ...prev, allergy: text }));
+    setNeedsFromAccount(false);
+  }
 
   async function handleSaveAccountInfo() {
     setSavingAccountInfo(true);
@@ -549,6 +673,14 @@ export default function DinerPage() {
     const defaultDate = addDays(new Date(), r.min_advance_days ?? 0);
     setBookingDate(toLocalDateStr(defaultDate));
     setParty(2);
+    if (user && hasDiningNeeds(accountNeeds)) {
+      setBookNeeds(accountNeeds);
+      setNeedsFromAccount(true);
+    } else {
+      setBookNeeds(emptyDiningNeeds());
+      setNeedsFromAccount(false);
+    }
+    setNeedsOpen(false);
     const { data: areaRows } = await supabase
       .from("restaurant_areas")
       .select("*")
@@ -684,6 +816,14 @@ export default function DinerPage() {
       alert("Something went wrong submitting your booking. Check the console for details.");
       return;
     }
+    if (hasDiningNeeds(bookNeeds)) {
+      const { error: needsError } = await supabase
+        .from("booking_needs")
+        .insert(diningNeedsRowForInsert(data.id, bookNeeds));
+      if (needsError) {
+        console.error("Saving dining needs for this booking failed:", needsError.message);
+      }
+    }
     setLastBooking(data);
     setScreen("confirmed");
   }
@@ -696,7 +836,7 @@ export default function DinerPage() {
     const { data } = await supabase
       .from("bookings")
       .select(
-        "*, restaurants(name, area, cancellation_notice_hours, opening_time, closing_time, max_party_size, restaurant_areas(id, name, capacity))"
+        "*, booking_needs(*), restaurants(name, area, cancellation_notice_hours, opening_time, closing_time, max_party_size, restaurant_areas(id, name, capacity))"
       )
       .eq("user_id", user.id)
       .order("created_at", { ascending: false });
@@ -904,6 +1044,20 @@ export default function DinerPage() {
       console.error("Edit booking failed:", error.message);
       alert("Something went wrong submitting your change. Check the console for details.");
       return;
+    }
+
+    const existingNeeds = editingBooking.booking_needs?.[0];
+    if (existingNeeds) {
+      const { error: needsError } = await supabase.from("booking_needs").insert({
+        booking_id: data.id,
+        wheelchair: existingNeeds.wheelchair,
+        high_chair: existingNeeds.high_chair,
+        allergy: existingNeeds.allergy,
+        allergy_detail: existingNeeds.allergy_detail,
+      });
+      if (needsError) {
+        console.error("Carrying over dining needs to the edited booking failed:", needsError.message);
+      }
     }
 
     setEditingBooking(null);
@@ -1279,6 +1433,54 @@ export default function DinerPage() {
                 </span>
               </div>
             )}
+          </div>
+
+          <div className="border-t border-b border-charcoal/[0.08] mb-7">
+            <button
+              type="button"
+              onClick={() => setNeedsOpen((v) => !v)}
+              aria-expanded={needsOpen}
+              className="w-full flex items-center gap-2.5 py-3 text-start"
+            >
+              <span
+                className={`w-[26px] h-[26px] rounded-full flex items-center justify-center flex-shrink-0 bg-tan text-burgundy transition-transform duration-300 ${
+                  needsOpen ? "rotate-45" : ""
+                }`}
+              >
+                <Plus size={14} strokeWidth={2.6} />
+              </span>
+              <span className="text-sm">
+                <span className="font-semibold text-charcoal">{t("diningNeedsPrompt")}</span>{" "}
+                <span className="text-muted">{t("optionalLabel")}</span>
+              </span>
+              {!needsOpen && diningNeedsSummary(bookNeeds, t, lang) && (
+                <span className="ms-auto text-xs text-muted text-end max-w-[45%] truncate">
+                  {diningNeedsSummary(bookNeeds, t, lang)}
+                </span>
+              )}
+            </button>
+            <div
+              style={{
+                gridTemplateRows: needsOpen ? "1fr" : "0fr",
+                transition: "grid-template-rows .35s cubic-bezier(.22,1,.36,1)",
+              }}
+              className="grid"
+            >
+              <div className="overflow-hidden">
+                <div className="pb-4">
+                  <DiningNeedsFields
+                    needs={bookNeeds}
+                    onToggle={toggleBookNeed}
+                    onAllergyChange={setBookAllergyText}
+                    t={t}
+                    allergyInputRef={allergyInputRef}
+                  />
+                  {needsFromAccount && diningNeedsSummary(bookNeeds, t, lang) && (
+                    <p className="text-xs text-muted mt-2.5">{t("filledFromAccount")}</p>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
 
           <SeatingPreferenceSection
@@ -1766,6 +1968,37 @@ export default function DinerPage() {
                 </p>
               )}
             </>
+          ) : accountView === "needs" ? (
+            <>
+              <button
+                onClick={() => setAccountView("main")}
+                className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium"
+              >
+                <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+              </button>
+              <h2 className="font-serif text-2xl mb-1 mt-2 text-charcoal">{t("diningNeeds")}</h2>
+              <p className="text-sm text-muted mb-5">{t("diningNeedsAccountSub")}</p>
+
+              <DiningNeedsFields
+                needs={accountNeeds}
+                onToggle={toggleAccountNeed}
+                onAllergyChange={setAccountAllergyText}
+                t={t}
+              />
+
+              <button
+                onClick={handleSaveAccountNeeds}
+                disabled={savingAccountNeeds}
+                className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60 text-center mt-7"
+              >
+                {savingAccountNeeds ? t("saving") : t("save")}
+              </button>
+              {accountNeedsSaved && (
+                <p className="text-xs text-burgundy mt-2 flex items-center justify-center gap-1">
+                  <Check size={12} /> {t("diningNeedsSavedConfirm")}
+                </p>
+              )}
+            </>
           ) : accountView === "payment" ? (
             <>
               <button
@@ -1808,6 +2041,18 @@ export default function DinerPage() {
                 >
                   <span>{t("paymentMethods")}</span>
                   <ChevronRight size={16} className="text-taupe rtl:rotate-180" />
+                </button>
+                <button
+                  onClick={() => setAccountView("needs")}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-sm font-medium text-charcoal"
+                >
+                  <span>{t("diningNeeds")}</span>
+                  <span className="flex items-center gap-1.5 text-taupe">
+                    <span className="max-w-[160px] truncate">
+                      {diningNeedsSummary(accountNeeds, t, lang) || t("diningNeedsNone")}
+                    </span>
+                    <ChevronRight size={16} className="rtl:rotate-180" />
+                  </span>
                 </button>
                 <button
                   onClick={() => setLang(lang === "en" ? "ar" : "en")}

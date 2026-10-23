@@ -96,6 +96,23 @@ create table bookings (
   created_at timestamp with time zone default now()
 );
 
+-- Accessibility/allergy info for one specific booking ("Anything we should
+-- know?" on the Booking screen). Deliberately its own table rather than
+-- columns on `bookings`: `bookings` stays publicly SELECTable on purpose (the
+-- "share with friends" link works via an unguessable UUID, no account
+-- needed — see the RLS comment on `bookings` below), but allergy info is
+-- health data that only the diner and the restaurant they booked with should
+-- ever see. One row per booking, created only when the diner actually
+-- selects a need (no row at all means "nothing to show").
+create table booking_needs (
+  booking_id uuid primary key references bookings(id) on delete cascade,
+  wheelchair boolean not null default false,
+  high_chair boolean not null default false,
+  allergy boolean not null default false,
+  allergy_detail text,     -- e.g. "tree nuts" — only meaningful when allergy = true
+  created_at timestamp with time zone default now()
+);
+
 -- Post-dining ratings. One review per booking (enforced by the unique
 -- constraint below, as well as by RLS — see the INSERT policy further down).
 create table reviews (
@@ -163,6 +180,41 @@ create policy "Owning customer or restaurant can update a booking"
       select 1 from restaurants
       where restaurants.id = bookings.restaurant_id
       and restaurants.owner_id = auth.uid()
+    )
+  );
+
+alter table booking_needs enable row level security;
+
+-- Only the diner who made the booking, or the owner of the restaurant it was
+-- made at, can read its dining needs — this is the actual privacy boundary
+-- for allergy info (health data), unlike `bookings` itself which is openly
+-- readable for the share-with-friends link.
+create policy "Diner or their restaurant can view booking needs"
+  on booking_needs for select
+  using (
+    exists (
+      select 1 from bookings b
+      where b.id = booking_needs.booking_id
+        and (
+          b.user_id = auth.uid()
+          or exists (
+            select 1 from restaurants
+            where restaurants.id = b.restaurant_id
+            and restaurants.owner_id = auth.uid()
+          )
+        )
+    )
+  );
+
+-- Only the diner who owns the booking can record needs for it (the
+-- restaurant side is read-only — it sees needs, it doesn't set them).
+create policy "Diner can add needs to their own booking"
+  on booking_needs for insert
+  with check (
+    exists (
+      select 1 from bookings b
+      where b.id = booking_needs.booking_id
+        and b.user_id = auth.uid()
     )
   );
 

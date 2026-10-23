@@ -1419,6 +1419,91 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     the shipped app. Also re-ran `next build` clean after removing it, confirming nothing
     else referenced it.
 
+- **Guest dining needs — "Anything we should know?" (2026-10-23):** diners can now flag
+  wheelchair access, a high chair, or an allergy (with free-text detail, e.g. "tree
+  nuts") per booking, save defaults to their account, and restaurants see them on the
+  dashboard. Matches the provided design file 1:1 in behavior, but rebuilt in Held's
+  actual brand tokens (`burgundy`/`cream`/`tan`/`taupe`/`muted`/`offwhite`, Georgia
+  serif) rather than the design file's slightly different palette.
+  - **Booking screen:** a new collapsed row sits directly below the Time section and
+    above Seating preference — a small `bg-tan` circle with a `Plus` icon, "Anything we
+    should know? (optional)", thin `border-charcoal/[0.08]` dividers above/below. Tapping
+    it animates open via a `grid-template-rows: 0fr → 1fr` transition (not a max-height
+    hack, so it doesn't need a hardcoded height) and the `+` rotates 45° into an `×`.
+    Open, it shows three `rounded-full` chips (Wheelchair access / High chair / Allergy),
+    each with a small icon (lucide `Accessibility`, lucide `Baby`, and a custom
+    `AllergyIcon` SVG — lucide has no allergy icon, so this reuses the exact mark from
+    the design file so it means the same thing everywhere it appears); selected chips
+    turn `bg-burgundy`. Picking Allergy reveals a text field ("Which allergy? e.g. tree
+    nuts") and auto-focuses it. Collapsed, a truncated grey summary (e.g. "Wheelchair
+    access, Allergy: tree nuts") shows on the trailing side of the row. The CTA button
+    and everything else on the screen is untouched, per the request.
+  - **Pre-fill from Account:** opening a restaurant's booking screen while logged in with
+    saved account needs pre-fills them and shows a grey note, "Filled in from your
+    account. Changes here apply to this booking only." — any chip toggle or allergy edit
+    on the Booking screen clears that flag (it's this-booking-only from that point on),
+    mirroring the design file's `fromAcct` behavior exactly.
+  - **Account screen:** a new "Dining needs" row sits between Payment methods and
+    Language in the account list, showing a grey summary or "None". Tapping it opens the
+    same chips/allergy-field UI plus "Saved for every booking. Restaurants only see this
+    when you book with them." and a Save button; saved into `user_metadata.dining_needs`
+    via `supabase.auth.updateUser`, the same mechanism already used for full name/phone/
+    reservation name on this screen — no new table needed for the account-level default
+    since it's private to the diner by construction (not exposed via the public
+    PostgREST API at all, unlike a real table).
+  - **Data model — a new `booking_needs` table, not columns on `bookings`:** `bookings`
+    stays publicly SELECTable on purpose (the "share with friends" link works via an
+    unguessable UUID, no account needed — see the 2026-08-29 RLS note). Allergy info is
+    health data, so it couldn't live on a row anyone can already read. `booking_needs`
+    (`booking_id` PK/FK, `wheelchair`, `high_chair`, `allergy`, `allergy_detail`) is its
+    own table with its own RLS: SELECT only for the diner who owns the booking or the
+    owner of the restaurant it was made at (checked via `exists` against `bookings` +
+    `restaurants.owner_id`, the same join pattern the existing bookings-UPDATE policy
+    uses), INSERT only for the diner on their own booking, no UPDATE/DELETE policy at
+    all (not needed — the app only ever inserts fresh rows). One row per booking, created
+    only when the diner actually selects a need — no row means nothing to show, so the
+    dashboard and "My Bookings" queries can just embed `booking_needs(*)` and check
+    `hasDiningNeeds()`. Editing an existing booking (which inserts a fresh pending row
+    superseding the old one, per the 2026-08-29 edit feature) now carries the original
+    booking's needs over to the new row too, so an allergy flag can't silently get lost
+    on an edit. Shared mapping logic (`emptyDiningNeeds`, `hasDiningNeeds`,
+    `diningNeedsSummary`, the camelCase⇄snake_case row converters) lives in one new file,
+    `lib/diningNeeds.js`, imported by both `app/page.js` and `app/dashboard/page.js` so
+    the two sides of the feature can't drift apart.
+  - **Restaurant dashboard:** small icon badges appear next to the guest's name on every
+    booking card that has any need set (pending/confirmed/dined/no-show/cancelled —
+    all five card types), using the same three icons as the diner app, teal-tinted to
+    match the dashboard's existing palette (the dashboard intentionally still uses the
+    older teal/ivory/brass palette, not burgundy/cream — see "Brand direction" below;
+    untouched by this change). Tapping the icons opens a small modal with the guest's
+    name and each need spelled out, allergy detail included.
+  - **Migration applied directly to the live project** (`cqckxtytqyvldqogpscy`, via the
+    Supabase MCP tool) rather than just written into `schema.sql` — `get_advisors`
+    (security) re-run afterward shows zero new findings for `booking_needs`; the three
+    warnings it still reports (`app_secrets`/`restaurant_tables` RLS-no-policy,
+    `sync_restaurant_forecast` SECURITY DEFINER, leaked-password-protection-disabled) are
+    all pre-existing and already documented elsewhere in this file.
+  - **New translation keys**, EN/AR: `diningNeeds`, `diningNeedsPrompt`, `optionalLabel`,
+    `wheelchairAccess`, `highChairNeed`, `allergyNeed`, `allergyPlaceholder`,
+    `filledFromAccount`, `diningNeedsNone`, `diningNeedsAccountSub`,
+    `diningNeedsSavedConfirm` — Arabic copy carried over verbatim from the design file's
+    own (already-written) Arabic strings rather than retranslated from scratch.
+  - **Tested live** against the real `masa-app` Supabase project: `next build` clean,
+    then the Booking screen's collapsed row through `npm run dev` + a real browser —
+    expand/collapse animation, chip selection turning burgundy with icons, the allergy
+    field appearing and auto-focusing, the collapsed summary truncating correctly — in
+    both English and Arabic (full RTL mirror: `+`/`×` circle and summary swap to the
+    leading/trailing sides that mirror for free under `dir="rtl"`, chip order reverses,
+    Arabic copy renders correctly, main CTA "احجز طاولتي" unaffected). **Not** verified
+    live end-to-end: saving Account defaults and actually submitting a booking (both need
+    a confirmed diner login — email confirmation is required on this project, so a
+    throwaway signup can't get a session without inbox access) and the restaurant
+    dashboard's icons/modal (needs a restaurant-owner login this session doesn't have
+    credentials for). Those paths were verified by code review and by the fact that both
+    reuse the exact same `DiningNeedsFields` component already confirmed working on the
+    Booking screen, not by clicking through them live — worth a real click-through next
+    time either login is available.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
   fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)

@@ -3,8 +3,58 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase/client";
-import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe } from "lucide-react";
+import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe, Accessibility, Baby } from "lucide-react";
 import { useLanguage } from "../../lib/LanguageContext";
+import { hasDiningNeeds, diningNeedsFromRow } from "../../lib/diningNeeds";
+
+// Lucide has no dedicated "allergy" icon — reuses the exact mark from the
+// Held guest-needs design file, same as the diner-facing app (app/page.js),
+// so the icon means the same thing on both sides of the booking.
+function AllergyIcon({ size = 16, className }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="M2 22 16 8" />
+      <path d="M3.47 12.53 5 11l1.53 1.53a3.5 3.5 0 0 1 0 4.94L5 19l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M7.47 8.53 9 7l1.53 1.53a3.5 3.5 0 0 1 0 4.94L9 15l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M11.47 4.53 13 3l1.53 1.53a3.5 3.5 0 0 1 0 4.94L13 11l-1.53-1.53a3.5 3.5 0 0 1 0-4.94Z" />
+      <path d="M20 2h2v2a4 4 0 0 1-4 4h-2V6a4 4 0 0 1 4-4Z" />
+    </svg>
+  );
+}
+
+// Small tappable icon row shown next to a guest's name on the dashboard, one
+// icon per active need — empty (renders nothing) when the booking has none.
+// Tapping opens the detail popover via `onOpen`, which is how the allergy
+// free-text gets surfaced (the icons alone are deliberately unlabeled).
+function NeedsIcons({ booking, onOpen, label }) {
+  const needs = diningNeedsFromRow(booking.booking_needs?.[0]);
+  if (!hasDiningNeeds(needs)) return null;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen(booking, needs);
+      }}
+      className="inline-flex items-center gap-1 text-teal flex-shrink-0"
+      aria-label={label}
+    >
+      {needs.wheelchair && <Accessibility size={13} />}
+      {needs.highChair && <Baby size={13} />}
+      {needs.allergyOn && <AllergyIcon size={13} />}
+    </button>
+  );
+}
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -14,6 +64,11 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [activeTab, setActiveTab] = useState("needsResponse");
+  const [needsDetail, setNeedsDetail] = useState(null); // { booking, needs } | null
+
+  function openNeedsDetail(booking, needs) {
+    setNeedsDetail({ booking, needs });
+  }
 
   useEffect(() => {
     async function checkAuth() {
@@ -36,7 +91,7 @@ export default function DashboardPage() {
     if (!restaurantId) return;
     const { data } = await supabase
       .from("bookings")
-      .select("*")
+      .select("*, booking_needs(*)")
       .eq("restaurant_id", restaurantId)
       .order("booking_date")
       .order("booking_time");
@@ -216,7 +271,9 @@ export default function DashboardPage() {
             <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-amber-50 border border-amber-100">
               <div>
                 <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name} · {t("guestsCount", { count: b.party_size })}
+                  {b.guest_name}
+                  <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
+                  · {t("guestsCount", { count: b.party_size })}
                   {b.occasion && (
                     <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-200 text-amber-800">
                       {b.occasion}
@@ -257,7 +314,9 @@ export default function DashboardPage() {
             <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-green-50 border border-green-100">
               <div>
                 <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name} · {t("guestsCount", { count: b.party_size })}
+                  {b.guest_name}
+                  <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
+                  · {t("guestsCount", { count: b.party_size })}
                   {b.occasion && (
                     <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                       {b.occasion}
@@ -304,7 +363,9 @@ export default function DashboardPage() {
               {dined.map((b) => (
                 <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200">
                   <div className="text-sm font-medium text-neutral-600 flex items-center gap-2">
-                    {b.guest_name} · {t("guestsCount", { count: b.party_size })}
+                    {b.guest_name}
+                    <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
+                    · {t("guestsCount", { count: b.party_size })}
                     {b.occasion && (
                       <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                         {b.occasion}
@@ -336,7 +397,9 @@ export default function DashboardPage() {
                   <div key={b.id} className="rounded-lg p-3 bg-red-50 border border-red-100">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-ink flex items-center gap-2">
-                        {b.guest_name} · {t("guestsCount", { count: b.party_size })}
+                        {b.guest_name}
+                        <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
+                        · {t("guestsCount", { count: b.party_size })}
                         {b.occasion && (
                           <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
                             {b.occasion}
@@ -375,8 +438,10 @@ export default function DashboardPage() {
               {cancelled.map((b) => (
                 <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200 flex items-center justify-between">
                   <div className="flex items-center justify-between flex-1">
-                    <span className="text-sm font-medium text-neutral-500">
-                      {b.guest_name} · {t("guestsCount", { count: b.party_size })}
+                    <span className="text-sm font-medium text-neutral-500 flex items-center gap-2">
+                      {b.guest_name}
+                      <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
+                      · {t("guestsCount", { count: b.party_size })}
                     </span>
                     <span className="text-xs text-neutral-400">{b.booking_date} · {b.booking_time} · {t("tableFreed")}</span>
                   </div>
@@ -395,6 +460,47 @@ export default function DashboardPage() {
         </>
         )}
       </div>
+
+      {needsDetail && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-6"
+          onClick={() => setNeedsDetail(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="font-serif text-lg text-ink">{t("diningNeeds")}</h3>
+              <button onClick={() => setNeedsDetail(null)} aria-label={t("dismiss")}>
+                <X size={16} className="text-neutral-500" />
+              </button>
+            </div>
+            <p className="text-xs text-neutral-500 mb-4">{needsDetail.booking.guest_name}</p>
+            <div className="flex flex-col gap-2.5 text-sm text-ink">
+              {needsDetail.needs.wheelchair && (
+                <div className="flex items-center gap-2">
+                  <Accessibility size={15} className="text-teal flex-shrink-0" /> {t("wheelchairAccess")}
+                </div>
+              )}
+              {needsDetail.needs.highChair && (
+                <div className="flex items-center gap-2">
+                  <Baby size={15} className="text-teal flex-shrink-0" /> {t("highChairNeed")}
+                </div>
+              )}
+              {needsDetail.needs.allergyOn && (
+                <div className="flex items-start gap-2">
+                  <AllergyIcon size={15} className="text-teal flex-shrink-0 mt-0.5" />
+                  <span>
+                    {t("allergyNeed")}
+                    {needsDetail.needs.allergy ? `: ${needsDetail.needs.allergy}` : ""}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
