@@ -1077,7 +1077,7 @@ export default function DinerPage() {
                         full ? "bg-tan/50 text-taupe" : "bg-tan text-charcoal"
                       }`}
                     >
-                      {tm} · {full ? t("slotFull") : t("tablesLeft", { count: remaining })}
+                      {tm}
                     </div>
                   );
                 })}

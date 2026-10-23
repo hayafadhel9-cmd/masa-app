@@ -1205,6 +1205,27 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   chips (No preference/Indoor/Outdoor/Shisha Terrace) are tappable, and selecting an hour
   (8 PM) and an area (Indoor) both visibly update the selected state correctly.
 
+- **Remaining-seat-count text removed from the Restaurant Detail "Available tonight" time
+  chips (2026-10-23, same day, follow-up):** per the user's request, each chip in the
+  `AVAILABLE TONIGHT` grid (`app/page.js`, the Restaurant Detail screen reachable from a
+  restaurant card, just above the Booking screen itself) now shows only the time (e.g.
+  "6:00 PM") instead of "6:00 PM · 75 remaining" / "6:00 PM · Full" — the `· {full ?
+  t("slotFull") : t("tablesLeft", {count: remaining})}` suffix was deleted from that one
+  chip's JSX. The `full`-dependent dimming (`bg-tan/50 text-taupe` vs. `bg-tan
+  text-charcoal`) was deliberately left untouched, so a full slot still reads as visually
+  disabled even with no text label. Scoped to only this one grid, per "change nothing
+  else": the two-step hour/minute picker on the Booking screen itself never showed a
+  remaining-count label to begin with (it only dims/disables), and the separate "Edit
+  Reservation" screen under My Bookings (`app/page.js`, its own time-slot grid around
+  `editTimeAvailability`) still shows its "N remaining"/"Full" sub-label exactly as before
+  — intentionally not touched. The `slotFull`/`tablesLeft` translation keys are kept (both
+  still used by the Edit Reservation screen). **Verified live**, phone-sized viewport, in
+  both English and Arabic/RTL: chips in `AVAILABLE TONIGHT` show bare times only, with
+  (currently, at real `test 2` capacities of Indoor 40/Outdoor 20/Shisha Terrace 15) none
+  dimmed since nothing is full — the dimming logic itself wasn't exercised live, but it's
+  unchanged code, already covered by the original feature's own live testing in the
+  2026-10-13/14 seating-areas entry above.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
   project's confirmation emails go through Resend, and Resend's free/sandbox mode will
