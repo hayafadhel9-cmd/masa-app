@@ -1744,6 +1744,67 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     `booking_needs` rows, cascaded) were deleted afterward — confirmed the restaurant's
     booking count is back to its original 11.
 
+- **Settings tab built out for real, replacing its earlier placeholder (2026-10-24):**
+  restaurant info, booking rules, no-show fee/free cancellation, a new minimum-spend
+  setting, seating areas, and menu-with-photos all now live in the dashboard's Settings
+  tab, in Held's cream/burgundy tokens — nothing from the old settings page was dropped.
+  - **Extracted into a shared `SettingsForm`** (`app/dashboard/_components/
+    SettingsForm.js`) rather than duplicated: the old `/dashboard/settings` page was 885
+    lines of form + seating-areas CRUD + menu CRUD all inline. That logic now lives in
+    one component used two ways — the new **Settings tab** (`SettingsTab.js`, thin
+    wrapper, no heading since the shell already shows one) and the **standalone
+    `/dashboard/settings` route** (now ~90 lines, down from 885), which still has to
+    exist on its own for onboarding: middleware exempts exactly that path from requiring
+    an existing restaurant, since a brand-new owner has nowhere else to create their
+    first restaurant row. Both now render byte-for-byte the same form, so they can't
+    drift apart again.
+  - **Seating areas stay in sync with the Requests tab**: when used as a tab,
+    `SettingsForm` takes the shell's own `areas` state and `loadAreas` reload callback as
+    props instead of fetching its own copy — editing an area's capacity in Settings now
+    immediately updates the "X of Y seats taken" line on Requests' cards too, rather than
+    going stale until the next tab switch. The standalone onboarding page has no such
+    shared state to go stale against, so it still manages its own area list locally
+    (same `SettingsForm`, just called without those two props).
+  - **New minimum-spend setting**: amount (AED per guest) + a 7-night toggle (new
+    `restaurants.min_spend_aed`/`min_spend_nights` columns, nights stored as
+    `Date#getDay()` indices 0–6, not day-name strings, so display labels are generated
+    per-locale the same way `lib/relativeDate.js` already does rather than stored).
+    This also resolves a scope-trim flagged in the 2026-10-24 Requests-tab entry above —
+    "Min spend AED N" on a request card was left out there because the setting didn't
+    exist yet; it's now wired in (`RequestsTab.js`), shown alongside an occasion badge
+    when both apply, for the current party size × the per-guest rate, only on the
+    nights the owner selected.
+  - **Dashboard language** moved from only the small sidebar globe icon into its own
+    explicit Settings section too (English/Arabic buttons, instant-apply, no new state —
+    same `useLanguage()`/`localStorage` mechanism already in place, which already behaves
+    as "this tablet only" since `localStorage` is per-browser/device, matching the
+    request's own framing).
+  - **Restyled throughout** from the old teal/ivory/white-bordered look to the same
+    cream/burgundy/tan/card visual language as the rest of the rebuilt dashboard — pill
+    inputs, `bg-card` rows for areas/menu items, burgundy selected-state buttons,
+    `font-serif` section headings. `ConfirmSheet` (used for delete confirmations) was
+    already cream/burgundy and needed no changes.
+  - **9 new translation keys**, EN/AR (286 total now, parity-checked — no gaps, no
+    duplicates); removed the now-unused `openFullSettings` key (and the CTA-link code
+    path on `PlaceholderTab` that used it) now that Settings is a real tab instead of a
+    link-out.
+  - **Data model**: `restaurants.min_spend_aed`/`min_spend_nights`, applied directly to
+    the live project and mirrored into `schema.sql`. No new RLS needed — already covered
+    by the existing owner-scoped `restaurants` UPDATE policy — re-confirmed with
+    `get_advisors`: no new findings.
+  - **Tested live against the real project**, both languages: `next build` clean, then
+    the same throwaway-route technique as the other 2026-10-24 entries (deleted before
+    committing, `next build` re-verified clean), this time rendering `SettingsForm`
+    directly against the real restaurant row as a fixture — but seating areas and menu
+    items were **not** fixtures, since both already have public-read RLS policies, so
+    the form fetched them live via the anon key exactly as a real visitor would: the real
+    3 areas (Indoor/40, Outdoor/20, Shisha Terrace/15) and the real 2 menu items with
+    their real photos all rendered correctly. Confirmed every field prefills from real
+    data, the minimum-spend night toggle (Fri/Sat) selects correctly, an area's edit mode
+    opens with the burgundy ring highlight, and the dashboard-language buttons work — in
+    both English and Arabic (RTL mirrored throughout, verified directly since this form
+    happened to load in Arabic first from a prior test's `localStorage` state).
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.

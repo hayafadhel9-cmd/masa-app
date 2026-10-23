@@ -21,6 +21,7 @@ import RequestsTab from "./_components/RequestsTab";
 import TonightTab from "./_components/TonightTab";
 import UpcomingTab from "./_components/UpcomingTab";
 import PlaceholderTab from "./_components/PlaceholderTab";
+import SettingsTab from "./_components/SettingsTab";
 
 const NAV_ITEMS = [
   { key: "requests", labelKey: "navRequests", Icon: Inbox },
@@ -254,6 +255,7 @@ export default function DashboardPage() {
 
         {activeTab === "requests" && (
           <RequestsTab
+            restaurant={restaurant}
             bookings={bookings}
             areas={areas}
             lang={lang}
@@ -289,7 +291,12 @@ export default function DashboardPage() {
         {activeTab === "receipts" && <PlaceholderTab t={t} />}
         {activeTab === "analytics" && <PlaceholderTab t={t} />}
         {activeTab === "settings" && (
-          <PlaceholderTab t={t} ctaLabel={t("openFullSettings")} onCta={() => router.push("/dashboard/settings")} />
+          <SettingsTab
+            restaurant={restaurant}
+            areas={areas}
+            onAreasChanged={() => loadAreas(selected)}
+            onRestaurantSaved={(saved) => setRestaurants((prev) => prev.map((r) => (r.id === saved.id ? saved : r)))}
+          />
         )}
       </main>
 

@@ -1,87 +1,35 @@
 "use client";
 
-import { useEffect, useState, useCallback, Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase/client";
-import { toLocalDateStr } from "../../../lib/date";
-import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide-react";
+import { ChevronLeft, Globe } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
-import ConfirmSheet from "../../components/ConfirmSheet";
+import SettingsForm from "../_components/SettingsForm";
 
-const MENU_PHOTOS_BUCKET = "menu-photos";
-// Mirrors the menu-photos storage bucket's own file_size_limit and
-// allowed_mime_types (the real, server-enforced boundary) — this is just
-// faster feedback for legitimate users, not the security check itself.
-const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
-const ALLOWED_PHOTO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-
-function validatePhotoFile(file, t) {
-  if (!ALLOWED_PHOTO_TYPES.includes(file.type)) {
-    return t("photoTypeInvalid");
-  }
-  if (file.size > MAX_PHOTO_BYTES) {
-    return t("photoTooLarge");
-  }
-  return null;
-}
-
-function extractStoragePath(url) {
-  if (!url) return null;
-  const marker = `/${MENU_PHOTOS_BUCKET}/`;
-  const idx = url.indexOf(marker);
-  return idx === -1 ? null : url.slice(idx + marker.length);
-}
-
-const PRICE_TIERS = ["$", "$$", "$$$", "$$$$"];
-
-export default function RestaurantSettingsPage() {
+// Standalone route, kept for two cases the dashboard shell's Settings tab
+// can't handle itself: onboarding (a brand-new owner with no restaurant row
+// yet — middleware exempts exactly this path from requiring one) and any
+// direct link/bookmark to /dashboard/settings. Everything else — the actual
+// form — lives in SettingsForm now, shared with the Settings tab
+// (app/dashboard/_components/SettingsTab.js) so neither copy can drift from
+// the other.
+export default function DashboardSettingsPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">Loading…</div>}>
-      <RestaurantSettingsInner />
+    <Suspense fallback={<div className="min-h-screen bg-cream flex items-center justify-center text-sm text-taupe">Loading…</div>}>
+      <DashboardSettingsInner />
     </Suspense>
   );
 }
 
-function RestaurantSettingsInner() {
+function DashboardSettingsInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { lang, setLang, t } = useLanguage();
   const isOnboarding = searchParams.get("onboarding") === "true";
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [restaurant, setRestaurant] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [savedMsg, setSavedMsg] = useState("");
-  const [saveError, setSaveError] = useState(false);
-
-  const [name, setName] = useState("");
-  const [cuisine, setCuisine] = useState("");
-  const [area, setArea] = useState("");
-  const [address, setAddress] = useState("");
-  const [priceTier, setPriceTier] = useState("$$");
-  const [noShowFee, setNoShowFee] = useState(0);
-  const [noticeHours, setNoticeHours] = useState(2);
-  const [openingTime, setOpeningTime] = useState("18:00");
-  const [closingTime, setClosingTime] = useState("21:30");
-  const [partySizes, setPartySizes] = useState([2, 4, 6, 8]);
-  const [minAdvanceDays, setMinAdvanceDays] = useState(0);
-  const [maxAdvanceDays, setMaxAdvanceDays] = useState(30);
-  const [maxPartySize, setMaxPartySize] = useState(14);
-  const [areas, setAreas] = useState([]);
-  const [newAreaName, setNewAreaName] = useState("");
-  const [newAreaCapacity, setNewAreaCapacity] = useState("");
-  const [addingArea, setAddingArea] = useState(false);
-
-  const [menuItems, setMenuItems] = useState([]);
-  const [newDishName, setNewDishName] = useState("");
-  const [newDishPrice, setNewDishPrice] = useState("");
-  const [newDishFile, setNewDishFile] = useState(null);
-  const [newDishPreview, setNewDishPreview] = useState("");
-  const [addingDish, setAddingDish] = useState(false);
-
-  // The one confirm sheet currently pending — { title, description,
-  // confirmLabel, onConfirm } | null. Replaces window.confirm() everywhere
-  // on this page; see ConfirmSheet for the component itself.
-  const [confirmState, setConfirmState] = useState(null);
+  const [pendingRestaurantName, setPendingRestaurantName] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -99,787 +47,55 @@ function RestaurantSettingsInner() {
 
       if (data) {
         setRestaurant(data);
-        setName(data.name || "");
-        setCuisine(data.cuisine || "");
-        setArea(data.area || "");
-        setAddress(data.address || "");
-        setPriceTier(data.price_tier || "$$");
-        setNoShowFee(data.no_show_fee_aed || 0);
-        setNoticeHours(data.cancellation_notice_hours ?? 2);
-        setOpeningTime(data.opening_time || "18:00");
-        setClosingTime(data.closing_time || "21:30");
-        setPartySizes(data.party_sizes && data.party_sizes.length > 0 ? data.party_sizes : [2, 4, 6, 8]);
-        setMinAdvanceDays(data.min_advance_days ?? 0);
-        setMaxAdvanceDays(data.max_advance_days ?? 30);
-        setMaxPartySize(data.max_party_size ?? 14);
-        await loadAreas(data.id);
       } else if (userData.user?.user_metadata?.pending_restaurant_name) {
-        // First time here after signing up on the new dashboard sign-up
-        // screen (2026-10-24), which collects the restaurant name up front
-        // — carry it over so onboarding isn't asking for it twice.
-        setName(userData.user.user_metadata.pending_restaurant_name);
+        // First time here after signing up on the dashboard sign-up screen
+        // (2026-10-24), which collects the restaurant name up front — carry
+        // it over so onboarding isn't asking for it twice.
+        setPendingRestaurantName(userData.user.user_metadata.pending_restaurant_name);
       }
       setCheckingAuth(false);
     }
     load();
   }, [router]);
 
-  const loadMenuItems = useCallback(async (restaurantId) => {
-    if (!restaurantId) return;
-    const { data } = await supabase
-      .from("menu_items")
-      .select("*")
-      .eq("restaurant_id", restaurantId)
-      .order("sort_order");
-    setMenuItems(data || []);
-  }, []);
-
-  useEffect(() => {
-    if (restaurant) loadMenuItems(restaurant.id);
-  }, [restaurant, loadMenuItems]);
-
-  async function uploadMenuPhoto(file) {
-    const path = `${restaurant.id}/${crypto.randomUUID()}-${file.name}`;
-    const { error } = await supabase.storage.from(MENU_PHOTOS_BUCKET).upload(path, file);
-    if (error) throw error;
-    const { data } = supabase.storage.from(MENU_PHOTOS_BUCKET).getPublicUrl(path);
-    return data.publicUrl;
-  }
-
-  function handleNewDishFile(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const issue = validatePhotoFile(file, t);
-    if (issue) {
-      alert(issue);
-      e.target.value = "";
-      return;
-    }
-    setNewDishFile(file);
-    setNewDishPreview(URL.createObjectURL(file));
-  }
-
-  async function addMenuItem() {
-    if (!newDishName.trim() || !newDishPrice) return;
-    setAddingDish(true);
-    try {
-      const photo_url = newDishFile ? await uploadMenuPhoto(newDishFile) : null;
-      await supabase.from("menu_items").insert({
-        restaurant_id: restaurant.id,
-        name: newDishName.trim(),
-        price_aed: Number(newDishPrice),
-        sort_order: menuItems.length,
-        photo_url,
-      });
-      setNewDishName("");
-      setNewDishPrice("");
-      setNewDishFile(null);
-      setNewDishPreview("");
-      await loadMenuItems(restaurant.id);
-    } catch (err) {
-      alert("Photo upload failed: " + err.message);
-    }
-    setAddingDish(false);
-  }
-
-  async function saveMenuItem(item, patch, file) {
-    try {
-      let photo_url = item.photo_url;
-      if (file) {
-        photo_url = await uploadMenuPhoto(file);
-        const oldPath = extractStoragePath(item.photo_url);
-        if (oldPath) await supabase.storage.from(MENU_PHOTOS_BUCKET).remove([oldPath]);
-      }
-      await supabase.from("menu_items").update({ ...patch, photo_url }).eq("id", item.id);
-      await loadMenuItems(restaurant.id);
-    } catch (err) {
-      alert("Photo upload failed: " + err.message);
-    }
-  }
-
-  function deleteMenuItem(item) {
-    setConfirmState({
-      title: t("deleteDishConfirmTitle", { name: item.name }),
-      confirmLabel: t("delete"),
-      onConfirm: async () => {
-        setConfirmState(null);
-        await supabase.from("menu_items").delete().eq("id", item.id);
-        const path = extractStoragePath(item.photo_url);
-        if (path) await supabase.storage.from(MENU_PHOTOS_BUCKET).remove([path]);
-        await loadMenuItems(restaurant.id);
-      },
-    });
-  }
-
-  function togglePartySize(size) {
-    setPartySizes((prev) =>
-      prev.includes(size) ? prev.filter((x) => x !== size) : [...prev, size].sort((a, b) => a - b)
-    );
-  }
-
-  async function loadAreas(restaurantId) {
-    if (!restaurantId) return;
-    const { data } = await supabase
-      .from("restaurant_areas")
-      .select("*")
-      .eq("restaurant_id", restaurantId)
-      .order("created_at");
-    setAreas(data || []);
-  }
-
-  async function addArea() {
-    if (!newAreaName.trim()) return;
-    setAddingArea(true);
-    const { error } = await supabase.from("restaurant_areas").insert({
-      restaurant_id: restaurant.id,
-      name: newAreaName.trim(),
-      capacity: newAreaCapacity === "" ? null : Number(newAreaCapacity),
-    });
-    setAddingArea(false);
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    setNewAreaName("");
-    setNewAreaCapacity("");
-    await loadAreas(restaurant.id);
-  }
-
-  // Returns true on success so the row can leave edit mode.
-  async function saveArea(area, patch) {
-    const { error } = await supabase.from("restaurant_areas").update(patch).eq("id", area.id);
-    if (error) {
-      alert(error.message);
-      return false;
-    }
-    await loadAreas(restaurant.id);
-    return true;
-  }
-
-  async function deleteArea(area) {
-    if (areas.length <= 1) {
-      alert(t("removeAreaBlockedLastOne"));
-      return;
-    }
-    // Friendly, specific message up front — the DB trigger blocks this too
-    // (defense in depth for a raw API call), but its generic error isn't as
-    // clear as checking here first.
-    const { count } = await supabase
-      .from("bookings")
-      .select("id", { count: "exact", head: true })
-      .eq("restaurant_id", restaurant.id)
-      .eq("zone", area.name)
-      .in("status", ["pending", "confirmed"])
-      .gte("booking_date", toLocalDateStr(new Date()));
-    if ((count || 0) > 0) {
-      alert(t("removeAreaBlockedUpcoming"));
-      return;
-    }
-    setConfirmState({
-      title: t("removeAreaConfirmTitle", { name: area.name }),
-      description: t("removeAreaConfirmBody"),
-      confirmLabel: t("remove"),
-      onConfirm: async () => {
-        setConfirmState(null);
-        const { error } = await supabase.from("restaurant_areas").delete().eq("id", area.id);
-        if (error) {
-          alert(error.message);
-          return;
-        }
-        await loadAreas(restaurant.id);
-      },
-    });
-  }
-
-  async function handleSave(e) {
-    e.preventDefault();
-    setSaving(true);
-    setSavedMsg("");
-    setSaveError(false);
-    // Only the name/address pair BestTime looks venues up by needs a
-    // re-sync — every other field on this form (hours, capacity, fees...)
-    // saves the same way it always did, with no BestTime call.
-    const nameOrAddressChanged = name !== (restaurant?.name || "") || address !== (restaurant?.address || "");
-    const payload = {
-      name,
-      cuisine,
-      area,
-      address,
-      price_tier: priceTier,
-      no_show_fee_aed: Number(noShowFee),
-      cancellation_notice_hours: Number(noticeHours),
-      opening_time: openingTime,
-      closing_time: closingTime,
-      party_sizes: partySizes.length > 0 ? partySizes : [2, 4, 6, 8],
-      min_advance_days: Number(minAdvanceDays),
-      max_advance_days: Number(maxAdvanceDays),
-      max_party_size: Number(maxPartySize),
-    };
-
-    let error;
-    let savedRestaurantId = restaurant?.id;
-    if (restaurant) {
-      ({ error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id));
-    } else {
-      // First-time save with no existing row yet — happens when a restaurant
-      // owner reaches onboarding without a pre-created restaurant (e.g. email
-      // confirmation was required at signup, so the row couldn't be created
-      // until they had an active session).
-      const { data: userData } = await supabase.auth.getUser();
-      const { data, error: insertError } = await supabase
-        .from("restaurants")
-        .insert({ ...payload, owner_id: userData.user?.id, subscription_status: "trial" })
-        .select()
-        .single();
-      error = insertError;
-      if (data) {
-        setRestaurant(data);
-        savedRestaurantId = data.id;
-        // A restaurant needs at least one seating area from the start —
-        // mirrors the old default of a single "Indoor" zone.
-        await supabase.from("restaurant_areas").insert({ restaurant_id: data.id, name: "Indoor", capacity: null });
-        await loadAreas(data.id);
-      }
-    }
-
-    setSaving(false);
-    if (error) {
-      setSaveError(true);
-      setSavedMsg("Something went wrong: " + error.message);
-    } else {
-      // Fire-and-forget: BestTime is slow enough (an external API call) that
-      // waiting on it here would make a routine save feel broken. Only when
-      // the name/address pair that BestTime looks the venue up by actually
-      // changed (or this is a brand-new restaurant with an address already
-      // filled in) — every other field change saves with no BestTime call.
-      if (savedRestaurantId && (nameOrAddressChanged || !restaurant) && address) {
-        fetch("/api/besttime/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ restaurant_id: savedRestaurantId }),
-        }).catch(() => {});
-      }
-      if (isOnboarding) {
-        router.push("/dashboard");
-        return;
-      }
-      setSavedMsg(t("saved"));
-    }
-  }
-
   if (checkingAuth) {
-    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">{t("loading")}</div>;
+    return <div className="min-h-screen bg-cream flex items-center justify-center text-sm text-taupe">{t("loading")}</div>;
   }
 
   if (!restaurant && !isOnboarding) {
     return (
-      <div className="max-w-md mx-auto min-h-screen bg-ivory px-6 pt-16 text-sm text-neutral-500">
+      <div className="max-w-md mx-auto min-h-screen bg-cream px-6 pt-16 text-sm text-muted">
         {t("noRestaurantLinked")}
       </div>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-ivory px-6 pb-16">
-      <div className="flex items-center justify-between pt-4">
-        <button
-          onClick={() => router.push("/dashboard")}
-          className="flex items-center gap-1 text-sm text-teal py-2"
-        >
+    <div className="max-w-xl mx-auto min-h-screen bg-cream px-6 pb-16">
+      <div className="flex items-center justify-between pt-4 mb-2">
+        <button onClick={() => router.push("/dashboard")} className="flex items-center gap-1 text-sm text-burgundy font-medium py-2">
           <ChevronLeft size={16} className="rtl:rotate-180" /> {isOnboarding ? t("skipForNow") : t("backToDashboard")}
         </button>
         <button
           onClick={() => setLang(lang === "en" ? "ar" : "en")}
-          className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
+          className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-tan text-charcoal flex-shrink-0"
         >
           <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
         </button>
       </div>
 
-      <h1 className="font-serif text-2xl text-ink mb-1 mt-2">
-        {isOnboarding ? t("setUpRestaurant") : t("restaurantSettings")}
-      </h1>
-      <p className="text-sm text-neutral-500 mb-6">
-        {isOnboarding ? t("onboardingSubtitle") : t("settingsSubtitle")}
-      </p>
-
-      <form onSubmit={handleSave} className="flex flex-col gap-4">
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("restaurantName")}</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("cuisine")}</label>
-          <input
-            value={cuisine}
-            onChange={(e) => setCuisine(e.target.value)}
-            placeholder={t("cuisinePlaceholder")}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("area")}</label>
-          <input
-            value={area}
-            onChange={(e) => setArea(e.target.value)}
-            placeholder={t("areaPlaceholder")}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("address")}</label>
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder={t("addressPlaceholder")}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-          <p className="text-xs text-neutral-400 mt-1.5">{t("addressHint")}</p>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("priceTier")}</label>
-          <div className="flex gap-2 mt-2">
-            {PRICE_TIERS.map((p) => (
-              <button
-                type="button"
-                key={p}
-                onClick={() => setPriceTier(p)}
-                className={`flex-1 rounded-lg py-2 text-sm border ${
-                  priceTier === p ? "bg-teal text-ivory border-teal" : "bg-white text-ink border-neutral-200"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            {t("advanceBookingQuestion")}
-          </label>
-          <div className="flex gap-2 mt-2 items-center">
-            <div className="flex-1">
-              <span className="text-[10px] text-neutral-400">{t("minNoticeDays")}</span>
-              <input
-                type="number"
-                min="0"
-                value={minAdvanceDays}
-                onChange={(e) => setMinAdvanceDays(e.target.value)}
-                className="w-full rounded-lg px-3 py-2.5 text-sm mt-1 outline-none bg-white border border-neutral-200"
-              />
-            </div>
-            <div className="flex-1">
-              <span className="text-[10px] text-neutral-400">{t("maxWindowDays")}</span>
-              <input
-                type="number"
-                min="0"
-                value={maxAdvanceDays}
-                onChange={(e) => setMaxAdvanceDays(e.target.value)}
-                className="w-full rounded-lg px-3 py-2.5 text-sm mt-1 outline-none bg-white border border-neutral-200"
-              />
-            </div>
-          </div>
-          <p className="text-[11px] text-neutral-400 mt-1">{t("advanceBookingHint")}</p>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("bookingHours")}</label>
-          <div className="flex gap-2 mt-2 items-center">
-            <input
-              type="time"
-              value={openingTime}
-              onChange={(e) => setOpeningTime(e.target.value)}
-              className="flex-1 rounded-lg px-3 py-2.5 text-sm outline-none bg-white border border-neutral-200"
-            />
-            <span className="text-xs text-neutral-400">{t("to")}</span>
-            <input
-              type="time"
-              value={closingTime}
-              onChange={(e) => setClosingTime(e.target.value)}
-              className="flex-1 rounded-lg px-3 py-2.5 text-sm outline-none bg-white border border-neutral-200"
-            />
-          </div>
-          <p className="text-[11px] text-neutral-400 mt-1">{t("bookingHoursHint")}</p>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            {t("maxPartySizeLabel")}
-          </label>
-          <input
-            type="number"
-            min="1"
-            value={maxPartySize}
-            onChange={(e) => setMaxPartySize(e.target.value)}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-          <p className="text-[11px] text-neutral-400 mt-1">{t("maxPartySizeHint")}</p>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("tableSizesOffered")}</label>
-          <div className="grid grid-cols-4 gap-2 mt-2">
-            {[2, 4, 6, 8, 10, 12].map((size) => (
-              <button
-                type="button"
-                key={size}
-                onClick={() => togglePartySize(size)}
-                className={`rounded-lg py-2 text-sm border ${
-                  partySizes.includes(size) ? "bg-teal text-ivory border-teal" : "bg-white text-ink border-neutral-200"
-                }`}
-              >
-                {size}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            {t("noShowFeeSetting")}
-          </label>
-          <input
-            type="number"
-            min="0"
-            value={noShowFee}
-            onChange={(e) => setNoShowFee(e.target.value)}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-        </div>
-
-        <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">
-            {t("cancellationWindowSetting")}
-          </label>
-          <input
-            type="number"
-            min="0"
-            value={noticeHours}
-            onChange={(e) => setNoticeHours(e.target.value)}
-            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
-          />
-        </div>
-
-        {savedMsg && (
-          <p className={`text-xs ${saveError ? "text-red-600" : "text-green-700"}`}>{savedMsg}</p>
-        )}
-
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory flex items-center justify-center gap-2 disabled:opacity-60"
-        >
-          <Save size={15} /> {saving ? t("saving") : isOnboarding ? t("finishSetup") : t("saveChanges")}
-        </button>
-      </form>
-
-      {restaurant && (
-        <div className="mt-8 pt-6 border-t border-neutral-200">
-          <h2 className="font-serif text-xl text-ink mb-1">{t("seatingAvailable")}</h2>
-          <p className="text-sm text-neutral-500 mb-4">{t("zoneCapacityHint")}</p>
-
-          <div className="flex flex-col gap-2 mb-4">
-            {areas.map((a) => (
-              <AreaRow key={a.id} area={a} onSave={saveArea} onDelete={deleteArea} canDelete={areas.length > 1} t={t} />
-            ))}
-          </div>
-
-          <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
-            <div className="flex items-center gap-2 mb-2">
-              <input
-                value={newAreaName}
-                onChange={(e) => setNewAreaName(e.target.value)}
-                placeholder={t("areaNamePlaceholder")}
-                className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-              />
-              <input
-                type="number"
-                min="0"
-                value={newAreaCapacity}
-                onChange={(e) => setNewAreaCapacity(e.target.value)}
-                placeholder={t("areaCapacityPlaceholder")}
-                className="w-24 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={addArea}
-              disabled={addingArea || !newAreaName.trim()}
-              className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
-            >
-              <Plus size={13} /> {addingArea ? t("adding") : t("addArea")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {restaurant && (
-        <div className="mt-8 pt-6 border-t border-neutral-200">
-          <h2 className="font-serif text-xl text-ink mb-1">{t("menu")}</h2>
-          <p className="text-sm text-neutral-500 mb-4">{t("menuSectionHint")}</p>
-
-          <div className="flex flex-col gap-2 mb-4">
-            {menuItems.length === 0 && <p className="text-xs text-neutral-400">{t("noMenuItems")}</p>}
-            {menuItems.map((item) => (
-              <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} t={t} />
-            ))}
-          </div>
-
-          <div className="rounded-xl p-3 bg-white border border-dashed border-neutral-300">
-            <div className="text-[10px] uppercase tracking-widest text-neutral-400 mb-2">{t("addADish")}</div>
-            <div className="flex items-center gap-2 mb-2">
-              <label className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden border border-neutral-200">
-                {newDishPreview ? (
-                  <img src={newDishPreview} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  <Camera size={16} className="text-neutral-400" />
-                )}
-                <input type="file" accept="image/*" className="hidden" onChange={handleNewDishFile} />
-              </label>
-              <input
-                value={newDishName}
-                onChange={(e) => setNewDishName(e.target.value)}
-                placeholder={t("dishNamePlaceholder")}
-                className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-              />
-              <input
-                type="number"
-                min="0"
-                value={newDishPrice}
-                onChange={(e) => setNewDishPrice(e.target.value)}
-                placeholder={t("aedPlaceholder")}
-                className="w-20 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={addMenuItem}
-              disabled={addingDish || !newDishName.trim() || !newDishPrice}
-              className="w-full rounded-full py-2.5 text-xs font-medium bg-teal text-ivory flex items-center justify-center gap-1.5 disabled:opacity-50"
-            >
-              <Plus size={13} /> {addingDish ? t("adding") : t("addDish")}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <ConfirmSheet
-        open={!!confirmState}
-        title={confirmState?.title}
-        description={confirmState?.description}
-        confirmLabel={confirmState?.confirmLabel}
-        cancelLabel={t("cancel")}
-        onConfirm={confirmState?.onConfirm}
-        onCancel={() => setConfirmState(null)}
+      <SettingsForm
+        restaurant={restaurant}
+        isOnboarding={isOnboarding}
+        pendingRestaurantName={pendingRestaurantName}
+        onSaved={(saved) => {
+          if (isOnboarding) {
+            router.push("/dashboard");
+            return;
+          }
+          setRestaurant(saved);
+        }}
       />
-    </div>
-  );
-}
-
-function AreaRow({ area, onSave, onDelete, canDelete, t }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(area.name);
-  const [capacity, setCapacity] = useState(area.capacity ?? "");
-  const [saving, setSaving] = useState(false);
-
-  function cancelEdit() {
-    setEditing(false);
-    setName(area.name);
-    setCapacity(area.capacity ?? "");
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    const ok = await onSave(area, {
-      name: name.trim(),
-      capacity: capacity === "" ? null : Number(capacity),
-    });
-    setSaving(false);
-    if (ok) setEditing(false);
-  }
-
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-3 rounded-xl p-3 bg-white border border-neutral-200">
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-ink truncate">{area.name}</div>
-          <div className="text-xs text-neutral-400">
-            {area.capacity === null || area.capacity === undefined
-              ? t("areaCapacityUnset")
-              : t("areaCapacityValue", { count: area.capacity })}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink flex-shrink-0"
-        >
-          {t("edit")}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(area)}
-          aria-label={t("removeArea")}
-          disabled={!canDelete}
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-red-50 text-red-600 flex-shrink-0 disabled:opacity-40"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-xl p-3 bg-white border border-teal">
-      <div className="flex items-center gap-2 mb-2">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-        />
-        <input
-          type="number"
-          min="0"
-          value={capacity}
-          onChange={(e) => setCapacity(e.target.value)}
-          placeholder={t("areaCapacityPlaceholder")}
-          className="w-24 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !name.trim()}
-          className="flex-1 rounded-full py-2 text-xs font-medium bg-teal text-ivory disabled:opacity-60"
-        >
-          {saving ? t("saving") : t("save")}
-        </button>
-        <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs bg-neutral-100 text-ink">
-          {t("cancel")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function MenuItemRow({ item, onSave, onDelete, t }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(item.name);
-  const [price, setPrice] = useState(item.price_aed);
-  const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(item.photo_url || "");
-  const [saving, setSaving] = useState(false);
-
-  function handleFile(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const issue = validatePhotoFile(f, t);
-    if (issue) {
-      alert(issue);
-      e.target.value = "";
-      return;
-    }
-    setFile(f);
-    setPreview(URL.createObjectURL(f));
-  }
-
-  function cancelEdit() {
-    setEditing(false);
-    setFile(null);
-    setPreview(item.photo_url || "");
-    setName(item.name);
-    setPrice(item.price_aed);
-  }
-
-  async function handleSave() {
-    setSaving(true);
-    await onSave(item, { name: name.trim(), price_aed: Number(price) }, file);
-    setSaving(false);
-    setFile(null);
-    setEditing(false);
-  }
-
-  if (!editing) {
-    return (
-      <div className="flex items-center gap-3 rounded-xl p-3 bg-white border border-neutral-200">
-        {item.photo_url ? (
-          <img src={item.photo_url} alt={item.name} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
-        ) : (
-          <div className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0">
-            <ImageOff size={16} className="text-neutral-300" />
-          </div>
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium text-ink truncate">{item.name}</div>
-          <div className="text-xs text-amber-700">AED {item.price_aed}</div>
-        </div>
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="text-xs rounded-full px-3 py-1.5 bg-neutral-100 text-ink flex-shrink-0"
-        >
-          {t("edit")}
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(item)}
-          aria-label={t("deleteDish")}
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-red-50 text-red-600 flex-shrink-0"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-xl p-3 bg-white border border-teal">
-      <div className="flex items-center gap-2 mb-2">
-        <label className="w-12 h-12 rounded-lg bg-neutral-100 flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden border border-neutral-200">
-          {preview ? (
-            <img src={preview} alt="" className="w-full h-full object-cover" />
-          ) : (
-            <Camera size={16} className="text-neutral-400" />
-          )}
-          <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
-        </label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="flex-1 rounded-lg px-3 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-        />
-        <input
-          type="number"
-          min="0"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          className="w-20 rounded-lg px-2 py-2 text-sm outline-none bg-neutral-50 border border-neutral-200"
-        />
-      </div>
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !name.trim()}
-          className="flex-1 rounded-full py-2 text-xs font-medium bg-teal text-ivory disabled:opacity-60"
-        >
-          {saving ? t("saving") : t("save")}
-        </button>
-        <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs bg-neutral-100 text-ink">
-          {t("cancel")}
-        </button>
-      </div>
     </div>
   );
 }

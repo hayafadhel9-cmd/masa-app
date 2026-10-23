@@ -108,7 +108,7 @@ function DeclineModal({ booking, onClose, onSubmit, t, lang }) {
   );
 }
 
-export default function RequestsTab({ bookings, areas, lang, t, reload, showToast, openNeedsModal, visitNumbers }) {
+export default function RequestsTab({ restaurant, bookings, areas, lang, t, reload, showToast, openNeedsModal, visitNumbers }) {
   const [declineTarget, setDeclineTarget] = useState(null);
   const today = toLocalDateStr(new Date());
 
@@ -172,6 +172,9 @@ export default function RequestsTab({ bookings, areas, lang, t, reload, showToas
           const OccasionIcon = b.occasion ? OCCASION_ICONS[b.occasion] : null;
           const capacity = zoneCapacityInfo(b, bookings, areas);
           const visitNumber = visitNumbers.get(b.id);
+          const bookingWeekday = new Date(`${b.booking_date}T00:00:00`).getDay();
+          const minSpendApplies =
+            restaurant.min_spend_aed > 0 && (restaurant.min_spend_nights || []).includes(bookingWeekday);
 
           return (
             <div key={b.id} className="rounded-2xl p-4 bg-card flex gap-4">
@@ -202,6 +205,9 @@ export default function RequestsTab({ bookings, areas, lang, t, reload, showToas
                     <span className="flex items-center gap-1 text-brass font-semibold">
                       {OccasionIcon && <OccasionIcon size={11} />} {t(`occasion${b.occasion}`)}
                     </span>
+                  )}
+                  {minSpendApplies && (
+                    <span>{t("minSpend", { amount: restaurant.min_spend_aed * b.party_size })}</span>
                   )}
                 </div>
                 {capacity && (

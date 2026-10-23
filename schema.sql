@@ -37,6 +37,13 @@ create table restaurants (
   -- rebuild) — when false, the Requests tab shows a paused notice. Diner-app
   -- booking creation is NOT gated by this yet (out of scope for that pass).
   accepting_requests boolean not null default true,
+  -- Minimum spend per guest (2026-10-24 Settings tab build-out), applying
+  -- only on the nights listed in min_spend_nights. Nights are JS
+  -- Date#getDay() indices (0=Sunday..6=Saturday), not day-name strings —
+  -- matches the app's existing locale-agnostic-storage convention, so
+  -- display labels are generated per-locale rather than stored.
+  min_spend_aed integer not null default 0,
+  min_spend_nights integer[] not null default '{}',
   created_at timestamp with time zone default now()
 );
 
