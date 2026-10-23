@@ -6,6 +6,7 @@ import { supabase } from "../../../lib/supabase/client";
 import { toLocalDateStr } from "../../../lib/date";
 import { ChevronLeft, Save, Plus, Trash2, Camera, ImageOff, Globe } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
+import ConfirmSheet from "../../components/ConfirmSheet";
 
 const MENU_PHOTOS_BUCKET = "menu-photos";
 // Mirrors the menu-photos storage bucket's own file_size_limit and
@@ -76,6 +77,11 @@ function RestaurantSettingsInner() {
   const [newDishFile, setNewDishFile] = useState(null);
   const [newDishPreview, setNewDishPreview] = useState("");
   const [addingDish, setAddingDish] = useState(false);
+
+  // The one confirm sheet currently pending — { title, description,
+  // confirmLabel, onConfirm } | null. Replaces window.confirm() everywhere
+  // on this page; see ConfirmSheet for the component itself.
+  const [confirmState, setConfirmState] = useState(null);
 
   useEffect(() => {
     async function load() {
@@ -186,12 +192,18 @@ function RestaurantSettingsInner() {
     }
   }
 
-  async function deleteMenuItem(item) {
-    if (!confirm(`Delete "${item.name}"?`)) return;
-    await supabase.from("menu_items").delete().eq("id", item.id);
-    const path = extractStoragePath(item.photo_url);
-    if (path) await supabase.storage.from(MENU_PHOTOS_BUCKET).remove([path]);
-    await loadMenuItems(restaurant.id);
+  function deleteMenuItem(item) {
+    setConfirmState({
+      title: t("deleteDishConfirmTitle", { name: item.name }),
+      confirmLabel: t("delete"),
+      onConfirm: async () => {
+        setConfirmState(null);
+        await supabase.from("menu_items").delete().eq("id", item.id);
+        const path = extractStoragePath(item.photo_url);
+        if (path) await supabase.storage.from(MENU_PHOTOS_BUCKET).remove([path]);
+        await loadMenuItems(restaurant.id);
+      },
+    });
   }
 
   function togglePartySize(size) {
@@ -258,13 +270,20 @@ function RestaurantSettingsInner() {
       alert(t("removeAreaBlockedUpcoming"));
       return;
     }
-    if (!confirm(t("removeAreaConfirm", { name: area.name }))) return;
-    const { error } = await supabase.from("restaurant_areas").delete().eq("id", area.id);
-    if (error) {
-      alert(error.message);
-      return;
-    }
-    await loadAreas(restaurant.id);
+    setConfirmState({
+      title: t("removeAreaConfirmTitle", { name: area.name }),
+      description: t("removeAreaConfirmBody"),
+      confirmLabel: t("remove"),
+      onConfirm: async () => {
+        setConfirmState(null);
+        const { error } = await supabase.from("restaurant_areas").delete().eq("id", area.id);
+        if (error) {
+          alert(error.message);
+          return;
+        }
+        await loadAreas(restaurant.id);
+      },
+    });
   }
 
   async function handleSave(e) {
@@ -648,6 +667,16 @@ function RestaurantSettingsInner() {
           </div>
         </div>
       )}
+
+      <ConfirmSheet
+        open={!!confirmState}
+        title={confirmState?.title}
+        description={confirmState?.description}
+        confirmLabel={confirmState?.confirmLabel}
+        cancelLabel={t("cancel")}
+        onConfirm={confirmState?.onConfirm}
+        onCancel={() => setConfirmState(null)}
+      />
     </div>
   );
 }

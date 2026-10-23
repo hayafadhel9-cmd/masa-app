@@ -1371,6 +1371,54 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     same form — same pattern the 2026-10-13/14 entry used for its own
     null-capacity-area gap.
 
+- **Browser confirm() popups replaced with an in-app confirm sheet (2026-10-23):** the two
+  remaining `window.confirm()` calls in the dashboard settings page (removing a seating
+  area, deleting a menu item) — the only ones in the app the request named — are gone,
+  replaced by a new shared `ConfirmSheet` component (`app/components/ConfirmSheet.js`) in
+  Held's own style rather than the browser's native dialog.
+  - **One reusable component**, controlled entirely by props (`open`, `title`,
+    `description`, `confirmLabel`, `cancelLabel`, `onConfirm`, `onCancel`) — no
+    page-specific logic baked in, so any future destructive action anywhere in the app can
+    reuse it the same way. The caller owns a single `confirmState`-shaped piece of state
+    (`{ title, description, confirmLabel, onConfirm } | null`); `deleteMenuItem()` and
+    `deleteArea()` in `app/dashboard/settings/page.js` now just call `setConfirmState({...})`
+    instead of gating on `confirm()`'s return value, with the actual delete logic moved
+    inside each one's `onConfirm`.
+  - **Visuals, matching the request exactly:** slides up from the bottom (`translate-y-full`
+    → `translate-y-0`, 200ms), `bg-cream` with `rounded-t-[28px]` top corners, a small
+    `bg-tan` handle bar, the background dimmed (`bg-charcoal/50`, fading in alongside the
+    slide) and tappable-to-cancel (the dim layer's own `onClick`, with the sheet itself
+    calling `stopPropagation()` so tapping the sheet doesn't also cancel). `font-serif
+    text-burgundy` title (e.g. "Remove Terrace?", "Delete Pizza Pepe?"), an optional
+    `text-muted` grey line below when the caller passes one (only the area-removal confirm
+    uses it — "Bookings already made here stay as they are.", true per the
+    2026-10-13/14 entry's note that `bookings.zone` stores an area's name as a plain text
+    snapshot, unaffected by the area row being deleted later), one `bg-burgundy
+    text-offwhite` confirm button, and a plain `text-burgundy` "Cancel" text link below it —
+    no description renders nothing extra, not an empty line (the dish-delete confirm has
+    none). Also closes on Escape. No RTL-specific classes needed anywhere in the
+    component — it's centered/full-width content top to bottom, which mirrors for free
+    under the document's existing `dir="rtl"` handling (unlike, say, the booking flow's
+    `ChevronLeft` back buttons, which do need an explicit `rtl:rotate-180`).
+  - **New translation keys** `removeAreaConfirmTitle`/`removeAreaConfirmBody` (replacing
+    the old single-string `removeAreaConfirm`, now split into the sheet's title/description
+    pair) and `deleteDishConfirmTitle`/`delete` (the menu-item delete confirm's hardcoded
+    English-only string — `` `Delete "${item.name}"?"` `` — is gone too; it had never been
+    translated to Arabic at all before this change, a pre-existing gap this fixes as a
+    side effect of moving it onto the shared component). EN/AR key parity re-verified
+    programmatically after the additions: 202 keys each, no duplicates, no gaps.
+  - **Tested live**, phone-sized viewport, both languages: since both real call sites live
+    behind the dashboard's owner login (same login-access gap as the settings Address field
+    above), verified via a temporary throwaway route outside `/dashboard` (so middleware's
+    auth gate didn't apply) rendering the real component with the real translation keys and
+    both real copy variants (area-removal with its description line, dish-delete without
+    one) — confirmed the cream/rounded/handle-bar/dim/burgundy-title/burgundy-button/plain-
+    Cancel look in English, the fully mirrored RTL layout in Arabic (title "إزالة Terrace؟",
+    body right-aligned, button "إزالة", Cancel "إلغاء"), and tap-outside-to-cancel actually
+    closing the sheet. Deleted the throwaway route before committing — it was never part of
+    the shipped app. Also re-ran `next build` clean after removing it, confirming nothing
+    else referenced it.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
   fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)
