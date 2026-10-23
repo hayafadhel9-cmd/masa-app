@@ -12,6 +12,7 @@ import { authErrorMessage } from "../lib/authErrorMessage";
 import { guestNameFromUser, guestPhoneFromUser } from "../lib/guestInfo";
 import { toLocalDateStr, addDays } from "../lib/date";
 import { isAreaFull, allAreasConfigured, remainingAcrossAreas, pickAvailableArea } from "../lib/areas";
+import { bestTimeValueForSlot, occupancyPctForSlot, combineBusyness, busynessLevel, BUSYNESS_DOT_COUNT } from "../lib/busyness";
 
 // Sentinel value for "let the restaurant pick any area with space" — stored
 // transiently in UI state only, never written to bookings.zone (which always
@@ -386,6 +387,10 @@ export default function DinerPage() {
   const [menuItems, setMenuItems] = useState([]);
   const [areaAvailability, setAreaAvailability] = useState({});
   const [timeAvailability, setTimeAvailability] = useState({});
+  // Cached BestTime.app weekly forecast for `active` (restaurant_forecasts.forecast),
+  // or null if never synced / BestTime found nothing. Public-read like areas/menu
+  // items — fetched the same way, no auth needed.
+  const [forecast, setForecast] = useState(null);
   const [bookingsView, setBookingsView] = useState("current");
   const [reviewedBookingIds, setReviewedBookingIds] = useState(new Set());
   const [ratingPromptBooking, setRatingPromptBooking] = useState(null);
@@ -550,6 +555,12 @@ export default function DinerPage() {
       .eq("restaurant_id", r.id)
       .order("created_at");
     setAreas(areaRows || []);
+    const { data: forecastRow } = await supabase
+      .from("restaurant_forecasts")
+      .select("forecast")
+      .eq("restaurant_id", r.id)
+      .maybeSingle();
+    setForecast(forecastRow?.forecast && Object.keys(forecastRow.forecast).length > 0 ? forecastRow.forecast : null);
     const { data } = await supabase
       .from("menu_items")
       .select("*")
@@ -921,6 +932,17 @@ export default function DinerPage() {
 
   const trackingTimeAvailability = Object.keys(timeAvailability).length > 0;
 
+  // Busyness label for the selected date+time: the higher of BestTime's
+  // cached forecast and Held's own occupancy (seats booked / total
+  // configured capacity) for that slot. null when neither signal exists,
+  // which the render below treats as "show nothing".
+  const bestTimeValue = bestTimeValueForSlot(forecast, bookingDate, time);
+  const occupancyPct = trackingTimeAvailability
+    ? occupancyPctForSlot(areas, timeAvailability[time])
+    : null;
+  const busynessValue = combineBusyness(bestTimeValue, occupancyPct);
+  const busynessLevelForSlot = busynessLevel(busynessValue);
+
   const dateStripDays = active
     ? generateDateStrip(active.min_advance_days, active.max_advance_days, lang === "ar" ? "ar" : "en-US")
     : [];
@@ -1056,6 +1078,7 @@ export default function DinerPage() {
           </div>
           <div className="text-xs mt-1.5 mb-1 flex items-center gap-2 text-muted">
             <MapPin size={12} /> {active.area}
+            {active.address ? ` · ${active.address}` : ""}
           </div>
           <div className="text-xs mb-5 flex items-center gap-2 text-muted">
             <Clock size={12} /> {active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"}
@@ -1238,6 +1261,24 @@ export default function DinerPage() {
                 );
               })}
             </div>
+
+            {busynessLevelForSlot && (
+              <div className="flex items-center gap-2 mt-3">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      className={`w-1.5 h-1.5 rounded-full ${
+                        i < BUSYNESS_DOT_COUNT[busynessLevelForSlot] ? "bg-brass" : "bg-tan"
+                      }`}
+                    />
+                  ))}
+                </div>
+                <span className="text-xs text-taupe">
+                  {t(`busy${busynessLevelForSlot[0].toUpperCase()}${busynessLevelForSlot.slice(1)}`, { time })}
+                </span>
+              </div>
+            )}
           </div>
 
           <SeatingPreferenceSection

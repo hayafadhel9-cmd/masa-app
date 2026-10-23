@@ -18,6 +18,12 @@ create table restaurants (
   -- restaurant's data was migrated into restaurant_areas; nothing in the app
   -- reads or writes these two columns anymore.
   zones text[] default array['Indoor'],  -- e.g. {Indoor,Outdoor,"Shisha Terrace"}
+  -- Street-level address (added 2026-10-23, alongside the busyness-forecast
+  -- feature) — distinct from the existing `area` column above, which is a
+  -- neighborhood name (e.g. "DIFC"), not a lookup-able street address.
+  -- Optional: a restaurant works fine with this unset, it just means no
+  -- BestTime forecast can be looked up for it (see restaurant_forecasts below).
+  address text,
   cancellation_notice_hours integer default 2,
   owner_id uuid references auth.users(id),  -- links a restaurant to its dashboard login
   opening_time text default '18:00',
@@ -412,3 +418,108 @@ $$;
 create trigger trg_prevent_unsafe_area_delete
 before delete on restaurant_areas
 for each row execute function prevent_unsafe_area_delete();
+
+-- Busyness forecast cache (added 2026-10-23) — a weekly snapshot of a
+-- restaurant's BestTime.app foot-traffic forecast, looked up by its name +
+-- the new `restaurants.address` column above. One row per restaurant.
+-- `forecast` is a compact `{ "0": [24 ints 0-100], ..., "6": [...] }` map,
+-- keyed by BestTime's `day_int` (0=Monday..6=Sunday — NOT JS's
+-- 0=Sunday..6=Saturday, see lib/busyness.js's dayIntFromDateStr), each array
+-- the venue's hourly 0-100 busyness for that day. `forecast = '{}'` (the
+-- default) means "looked up, BestTime found nothing" — distinct from no row
+-- at all, which means "never looked up" (e.g. no address set yet).
+create table restaurant_forecasts (
+  restaurant_id uuid primary key references restaurants(id) on delete cascade,
+  besttime_venue_id text,
+  forecast jsonb not null default '{}'::jsonb,
+  -- The exact name/address this forecast was fetched for — lets a sync
+  -- (dashboard save, or the weekly cron) tell "did the owner rename/move
+  -- since the last sync?" and re-search by name+address instead of reusing
+  -- a now-stale venue_id.
+  synced_name text,
+  synced_address text,
+  last_synced_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+alter table restaurant_forecasts enable row level security;
+
+create policy "Public can view restaurant forecasts"
+  on restaurant_forecasts for select
+  using (true);
+
+-- Deliberately no insert/update/delete policy — every write goes through
+-- sync_restaurant_forecast() below instead. This project has no Supabase
+-- service-role key (only the anon/publishable key, in both the browser and
+-- server-side API routes — see app/api/besttime/), so unlike
+-- restaurant_areas' owner-scoped RLS above, there's no `auth.uid()` session
+-- to check for the weekly cron's writes (it runs with no logged-in user,
+-- across every restaurant). A single small lockbox table instead:
+create table app_secrets (
+  key text primary key,
+  value text not null
+);
+alter table app_secrets enable row level security;
+-- No policies at all: unreadable/unwritable via PostgREST by anon or
+-- authenticated. Only a SECURITY DEFINER function (which runs with the
+-- table owner's privileges, bypassing RLS) can read it.
+
+-- Holds one row, key='forecast_sync_secret' — a random token also held in
+-- the server-only FORECAST_SYNC_SECRET env var (never NEXT_PUBLIC_, never
+-- sent to the browser). insert into app_secrets (key, value) values
+-- ('forecast_sync_secret', '<token>') on conflict (key) do update set
+-- value = excluded.value; -- run once per environment, not re-run by this
+-- file (no value to default to here without hardcoding a real secret into
+-- version control).
+
+-- The only way to write restaurant_forecasts: checks p_secret against the
+-- app_secrets row above and raises (errcode 42501) on any mismatch —
+-- including a missing row, i.e. the function fails closed, not open, if
+-- app_secrets was never seeded. Called by both app/api/besttime/sync
+-- (triggered when a restaurant saves its name/address) and
+-- app/api/besttime/refresh (the weekly cron), each passing
+-- process.env.FORECAST_SYNC_SECRET — never the browser, which never sees
+-- this secret or calls this function.
+create or replace function sync_restaurant_forecast(
+  p_restaurant_id uuid,
+  p_venue_id text,
+  p_forecast jsonb,
+  p_name text,
+  p_address text,
+  p_secret text
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  expected_secret text;
+begin
+  select value into expected_secret from app_secrets where key = 'forecast_sync_secret';
+  if expected_secret is null or p_secret is null or p_secret <> expected_secret then
+    raise exception 'Not authorized' using errcode = '42501';
+  end if;
+
+  insert into restaurant_forecasts (restaurant_id, besttime_venue_id, forecast, synced_name, synced_address, last_synced_at)
+  values (p_restaurant_id, p_venue_id, coalesce(p_forecast, '{}'::jsonb), p_name, p_address, now())
+  on conflict (restaurant_id) do update
+    set besttime_venue_id = excluded.besttime_venue_id,
+        forecast = excluded.forecast,
+        synced_name = excluded.synced_name,
+        synced_address = excluded.synced_address,
+        last_synced_at = excluded.last_synced_at;
+end;
+$$;
+
+-- Unlike enforce_booking_capacity()/prevent_unsafe_area_delete() above
+-- (whose EXECUTE was deliberately revoked from anon/authenticated once
+-- Supabase's advisor flagged them as unintentionally-public RPCs — see the
+-- 2026-10-13/14 seating-areas entry in PROJECT_STATUS.md), this function's
+-- anon/authenticated EXECUTE grant is intentional: the secret check above,
+-- not the PostgREST role, is what authorizes a write. The advisor still
+-- flags this function (anon_security_definer_function_executable /
+-- authenticated_security_definer_function_executable) — expected and
+-- verified live (wrong secret -> 42501; correct secret -> write succeeds).
+revoke all on function sync_restaurant_forecast(uuid, text, jsonb, text, text, text) from public;
+grant execute on function sync_restaurant_forecast(uuid, text, jsonb, text, text, text) to anon, authenticated;

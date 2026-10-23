@@ -55,6 +55,7 @@ function RestaurantSettingsInner() {
   const [name, setName] = useState("");
   const [cuisine, setCuisine] = useState("");
   const [area, setArea] = useState("");
+  const [address, setAddress] = useState("");
   const [priceTier, setPriceTier] = useState("$$");
   const [noShowFee, setNoShowFee] = useState(0);
   const [noticeHours, setNoticeHours] = useState(2);
@@ -95,6 +96,7 @@ function RestaurantSettingsInner() {
         setName(data.name || "");
         setCuisine(data.cuisine || "");
         setArea(data.area || "");
+        setAddress(data.address || "");
         setPriceTier(data.price_tier || "$$");
         setNoShowFee(data.no_show_fee_aed || 0);
         setNoticeHours(data.cancellation_notice_hours ?? 2);
@@ -270,10 +272,15 @@ function RestaurantSettingsInner() {
     setSaving(true);
     setSavedMsg("");
     setSaveError(false);
+    // Only the name/address pair BestTime looks venues up by needs a
+    // re-sync — every other field on this form (hours, capacity, fees...)
+    // saves the same way it always did, with no BestTime call.
+    const nameOrAddressChanged = name !== (restaurant?.name || "") || address !== (restaurant?.address || "");
     const payload = {
       name,
       cuisine,
       area,
+      address,
       price_tier: priceTier,
       no_show_fee_aed: Number(noShowFee),
       cancellation_notice_hours: Number(noticeHours),
@@ -286,6 +293,7 @@ function RestaurantSettingsInner() {
     };
 
     let error;
+    let savedRestaurantId = restaurant?.id;
     if (restaurant) {
       ({ error } = await supabase.from("restaurants").update(payload).eq("id", restaurant.id));
     } else {
@@ -302,6 +310,7 @@ function RestaurantSettingsInner() {
       error = insertError;
       if (data) {
         setRestaurant(data);
+        savedRestaurantId = data.id;
         // A restaurant needs at least one seating area from the start —
         // mirrors the old default of a single "Indoor" zone.
         await supabase.from("restaurant_areas").insert({ restaurant_id: data.id, name: "Indoor", capacity: null });
@@ -314,6 +323,18 @@ function RestaurantSettingsInner() {
       setSaveError(true);
       setSavedMsg("Something went wrong: " + error.message);
     } else {
+      // Fire-and-forget: BestTime is slow enough (an external API call) that
+      // waiting on it here would make a routine save feel broken. Only when
+      // the name/address pair that BestTime looks the venue up by actually
+      // changed (or this is a brand-new restaurant with an address already
+      // filled in) — every other field change saves with no BestTime call.
+      if (savedRestaurantId && (nameOrAddressChanged || !restaurant) && address) {
+        fetch("/api/besttime/sync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ restaurant_id: savedRestaurantId }),
+        }).catch(() => {});
+      }
       if (isOnboarding) {
         router.push("/dashboard");
         return;
@@ -387,6 +408,17 @@ function RestaurantSettingsInner() {
             placeholder={t("areaPlaceholder")}
             className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
           />
+        </div>
+
+        <div>
+          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("address")}</label>
+          <input
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder={t("addressPlaceholder")}
+            className="w-full rounded-lg px-3 py-2.5 text-sm mt-2 outline-none bg-white border border-neutral-200"
+          />
+          <p className="text-xs text-neutral-400 mt-1.5">{t("addressHint")}</p>
         </div>
 
         <div>

@@ -1226,7 +1226,159 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   unchanged code, already covered by the original feature's own live testing in the
   2026-10-13/14 seating-areas entry above.
 
+- **BestTime.app busyness label on the Booking screen (2026-10-23):** a new "Quiet /
+  Lively / Busy at [time]" indicator under the two-step Time picker, combining a cached
+  BestTime.app foot-traffic forecast with Held's own live booking occupancy for the
+  selected date+time. Touches the schema, two new server-only API routes, a weekly Vercel
+  Cron job, and both the dashboard settings and customer booking screens.
+  - **New `restaurants.address` column** (nullable text) — distinct from the pre-existing
+    `area` column (a neighborhood name like "DIFC", not a lookup-able address). Added to
+    the dashboard settings form right after the Area field, in English and Arabic
+    (`address`/`addressPlaceholder`/`addressHint` keys), and shown on the customer-facing
+    Restaurant Detail screen on the same line as the existing area/MapPin row (`app/page.js`
+    — `{active.area} · {active.address}`). Optional: a restaurant with no address set just
+    never gets a forecast, same as before this feature existed.
+  - **New `restaurant_forecasts` table** (one row per restaurant): `besttime_venue_id`,
+    `forecast` (a compact `{ "0": [24 ints 0-100], ..., "6": [...] }` map keyed by
+    BestTime's `day_int`, 0=Monday..6=Sunday), `synced_name`/`synced_address` (what the
+    forecast was fetched for, so a later sync can tell "did the owner rename/move since
+    then?"), `last_synced_at`. RLS: public `select` (read client-side with no login, same
+    as `restaurant_areas`/menu items); deliberately **no** insert/update/delete policy.
+  - **No Supabase service-role key exists in this project** (`.env.local`/Vercel only ever
+    had the anon/publishable key) — unlike `restaurant_areas`' owner-scoped RLS, there's no
+    `auth.uid()` session for the weekly cron's writes (it runs with nobody logged in,
+    across every restaurant at once). Solution: a `sync_restaurant_forecast()` Postgres
+    function (`SECURITY DEFINER`, bypasses RLS) that is the *only* way to write
+    `restaurant_forecasts`, gated by a `p_secret` parameter checked against a row in a new
+    `app_secrets` table (itself RLS-enabled with **no policies at all**, so only the
+    SECURITY DEFINER function can ever read it) — the secret lives in the
+    `FORECAST_SYNC_SECRET` env var, server-only, never sent to the browser. This is a
+    deliberate departure from the 2026-10-13/14 entry's own lesson ("revoke `EXECUTE` from
+    anon/authenticated once Supabase's advisor flags a `SECURITY DEFINER` function as a
+    directly-callable RPC") — here the grant to anon/authenticated is intentional, since
+    the secret parameter is the real authorization check, not the Postgres role. Re-ran the
+    same kind of live verification that lesson called for: Supabase's advisor does flag the
+    function (`anon_security_definer_function_executable`,
+    `authenticated_security_definer_function_executable`) — expected; a raw unauthenticated
+    `curl` RPC call with the wrong secret gets `42501`/"Not authorized", and the same call
+    with the correct secret succeeds (verified both live against the real project before
+    writing any application code against it).
+  - **`lib/besttime.js`** (server-only; imported only by the two routes below — never by a
+    `"use client"` file, so `BESTTIME_API_KEY` never reaches a browser bundle):
+    `fetchBestTimeForecast({ venueId } | { name, address })` wraps `POST
+    https://besttime.app/api/v1/forecasts`. **A real correctness bug caught and fixed before
+    shipping:** BestTime's `analysis[].day_raw` is a 24-element array, but it is **not**
+    indexed by wall-clock hour (index 0 = midnight) — BestTime orders every day starting at
+    6 AM (their documented "BestTime Day", which runs 6am→5am so a nightlife venue's late
+    night doesn't split across two calendar dates). Caught by fetching a real forecast for
+    an already-BestTime-known Dubai venue and cross-checking `day_raw` against the same
+    response's `hour_analysis[].hour` field (which does carry an explicit wall-clock hour):
+    `day_raw[2]` lined up with `hour_analysis`'s `{hour: 8, intensity_txt: "Low"}`, i.e.
+    index 2 = 8am = index 0 + 2, confirming index 0 = 6am, not midnight — naively reading
+    `day_raw[hour]` would have silently mislabeled every single hour. Fixed by rotating
+    `day_raw` into true wall-clock-hour indexing (`out[(6+i) % 24] = day_raw[i]`) at
+    ingestion time in `toForecastMap()`, so `restaurant_forecasts.forecast` and everything
+    that reads it (`lib/busyness.js`) can just do `forecast[dayInt][hour]` with no offset
+    to remember. A "venue not found" response (BestTime returns HTTP 404 with
+    `status: "Error"` for this, confirmed live) resolves to `{ venueId: null, forecast: {} }`
+    rather than throwing — the normal "nothing to show" case, not an error.
+  - **`lib/busyness.js`** (shared, no server-only dependency): `dayIntFromDateStr()`
+    converts a booking date string to BestTime's day_int (0=Monday..6=Sunday — not JS
+    `Date#getDay()`'s 0=Sunday..6=Saturday, so it's `(jsDay + 6) % 7`, not a direct
+    reindex); `hour24FromSlot()` parses a slot like `"8:00 PM"` to 20 (a `:30` slot shares
+    its hour's value, since BestTime's forecast is hourly); `occupancyPctForSlot()` is
+    `(totalConfiguredCapacity - remaining) / totalConfiguredCapacity * 100`, `null` when
+    capacity isn't fully configured across every area (mirrors the existing "don't show a
+    misleading partial signal" rule the Time/Seating availability already follows, see the
+    2026-10-13/14 entry); `combineBusyness()` takes the higher of the two signals, `null`
+    only when *neither* exists; `busynessLevel()` buckets into `quiet`
+    (<40)/`lively`(40-75)/`busy`(>75) per the request's thresholds.
+  - **`app/api/besttime/sync`** (POST): called by the dashboard settings page right after a
+    save where the name or address actually changed (compared against the previously-saved
+    values — every other field, hours/capacity/fees/etc., saves exactly as it always did,
+    with no BestTime call). Reads the restaurant's name/address from the database (not from
+    the request body, so a client can't spoof what gets looked up), checks the caller's
+    session owns that restaurant (same `owner_id = auth.uid()` check pattern as everywhere
+    else), calls BestTime, then the secret-gated RPC. The dashboard's `handleSave()` fires
+    this with `fetch(...).catch(() => {})` — deliberately not awaited, since waiting on an
+    external API call would make a routine settings save (e.g. just changing the no-show
+    fee) feel broken; the diner-facing label just won't reflect a brand-new address until
+    the fetch completes a moment later or the weekly cron catches it.
+  - **`app/api/besttime/refresh`** (GET, weekly cron via `vercel.json`'s `"0 3 * * 1"`
+    schedule): no user session exists for a cron run, so this uses the plain anon client;
+    write authorization is the RPC's secret check, not a role. Gated by `CRON_SECRET` — if
+    set as a Vercel project env var, Vercel automatically sends
+    `Authorization: Bearer $CRON_SECRET` on its own cron requests, so this needs no extra
+    wiring once that env var exists there; without it (or with the wrong value) the route
+    401s *before* ever calling BestTime, so a stray/guessed request can't burn BestTime
+    credits. For each restaurant with an address: reuses the cached `besttime_venue_id` (a
+    precise, cheaper refresh) only if the name/address hasn't changed since the last sync;
+    otherwise searches fresh by name/address, same as the per-save route — so a restaurant
+    whose owner changed details without the per-save sync completing (or from legacy data)
+    self-heals within a week.
+  - **Added `FORECAST_SYNC_SECRET` and `CRON_SECRET`** to `.env.local`/`.env.local.example`
+    (random tokens, generated this session) — **not yet added to Vercel**, unlike
+    `BESTTIME_API_KEY` which the user had already provisioned there; the scheduled refresh
+    cron won't authenticate in production until the same two values are added to the
+    Vercel project's env vars (local dev and the per-save sync route both work already,
+    since those don't depend on Vercel's cron infrastructure).
+  - **Rendering** (`app/page.js`, Booking screen, under the Time picker, before Seating
+    preference): three 6px dots (`bg-brass` filled / `bg-tan` empty, 1/2/3 filled for
+    quiet/lively/busy) plus `text-taupe` label text, shown only when a level exists (per
+    the "BestTime finds nothing + no bookings = show nothing" requirement — `null` all the
+    way through, never a default-to-zero "Quiet"). New `busyQuiet`/`busyLively`/`busyBusy`
+    translation keys (`"Quiet/Lively/Busy at {time}"` and Arabic equivalents) — EN/AR key
+    parity re-verified programmatically after all of this session's additions (199 keys
+    each, no duplicates, matching the 2026-10-17 entry's own verification method).
+  - **Tested live, real data, not fixtures:** per the request, `test 2` (this project's
+    only restaurant) was renamed to **Al Khayma Heritage Restaurant**, address `Historical
+    Neighbourhood 79 Al Mussallah Rd Al Souq Al Kabeer - Al Fahidi - Dubai United Arab
+    Emirates` — a real Dubai restaurant already known to this BestTime account from a prior
+    search (confirmed via `GET /api/v1/venues` before committing to it, specifically so the
+    name+address match was known-good rather than guessed; an earlier attempt using **La
+    Petite Maison** / Gate Village 8, DIFC genuinely 404'd as "could not confirm the venue"
+    from BestTime — even retried against other well-known, high-traffic real venues
+    (Zuma Dubai, Nobu Dubai, a Starbucks in Times Square) with the same result, which is
+    what surfaced that this account's forecast-matching needs an exact previously-indexed
+    name/address rather than any real address being sufficient — worth knowing for whoever
+    sets up a restaurant's real address later: use the venue's exact Google Maps-listed name
+    if a fresh lookup 404s).
+    - Ran the real `/api/besttime/refresh` route (not a simulated call) with the correct
+      `CRON_SECRET` against the live dev server — `{"synced":1,"skipped":0,"failed":0}` —
+      and confirmed `restaurant_forecasts` held a real 7-day forecast with
+      `besttime_venue_id` populated.
+    - **Both API routes' auth gates verified live, not just by reading the code:** `POST
+      /api/besttime/sync` with no session → 401; `GET /api/besttime/refresh` with no
+      `Authorization` header → 401; with the wrong bearer token → 401.
+    - **Booking screen, phone-sized viewport, English and Arabic/RTL:** confirmed the
+      address line on Restaurant Detail; confirmed all three busyness levels actually
+      render by selecting different hours against the real fetched forecast — 6 PM → "●●○
+      Lively at 6:00 PM" (today's real day-of-week forecast value 75), 9 PM → "●●● Busy at
+      9:00 PM" (95), 11 PM → "●○○ Quiet at 11:00 PM" (0, venue closed per BestTime) — each
+      confirmed again in Arabic (e.g. "مزدحم في 9:00 PM", dots unchanged by RTL mirroring
+      since "N of 3 filled" has no inherent direction, unlike the existing `StarPicker`'s
+      1-5 ordinal scale which does force `direction: ltr`).
+    - A full `next build` (production build, not just dev mode) passes cleanly with every
+      new file included.
+  - **Not independently tested live:** the dashboard settings Address field itself (typing
+    into it, saving, seeing the sync fire) was not clicked through with a real dashboard
+    login — doing so would have needed either the restaurant owner's actual password
+    (never requested, per this session's own handling rules around credentials) or a fresh
+    signed-up test account, which hits the already-documented Resend sandbox limitation
+    below (confirmation emails only deliver to the account owner's own address). Covered
+    instead by a full `next build` (no type/compile errors) and the field's near-exact
+    structural match to the pre-existing, already-proven Area field right above it in the
+    same form — same pattern the 2026-10-13/14 entry used for its own
+    null-capacity-area gap.
+
 ## Known limitations / deliberate simplifications (not bugs)
+- **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
+  fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)
+  were added to `.env.local` this session but not to Vercel's project env vars — until
+  someone adds the same two values there, `GET /api/besttime/refresh` 401s on every real
+  Vercel Cron invocation (harmlessly — it fails closed before calling BestTime). The
+  per-save sync (`POST /api/besttime/sync`, triggered from the dashboard) is unaffected,
+  since it doesn't depend on Vercel's cron infrastructure.
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
   project's confirmation emails go through Resend, and Resend's free/sandbox mode will
   only actually deliver to the email address that owns the Resend account
