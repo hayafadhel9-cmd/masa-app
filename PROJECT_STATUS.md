@@ -1178,6 +1178,33 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
   handles RTL. No test booking was created (reached the "Secure your table" screen to
   inspect the text without submitting).
 
+- **"Can't tap time slots or seating preference" investigated and fixed (2026-10-23):**
+  reported as a live Booking-screen bug — time chips and the seating-preference chips were
+  all unresponsive/disabled. Investigated the three hypotheses the user raised (a visual
+  layer sitting on top blocking taps, slots wrongly marked full, the two-step time picker
+  missing a selected day) by running the app live on a phone-sized viewport in both English
+  and Arabic/RTL: `EDGE_FADE_STYLE` (the date/hour strip fade from the 2026-10-04 entry
+  above) is a `mask-image` only, not pointer-blocking, and no overlay/z-index element sits
+  over the Time or Seating preference sections; the date strip always has a day selected
+  (`bookingDate` defaults and the "always something selected" effect at `app/page.js`
+  still holds); and the Arabic/RTL render was pixel-for-pixel the same disabled state as
+  English, ruling out an RTL-specific layout bug. **Root cause: data, not code.** The only
+  restaurant in the database, `test 2`, had all three of its `restaurant_areas` rows
+  (Indoor/Outdoor/Shisha Terrace) at `capacity = 0` — per the capacity semantics documented
+  in the 2026-10-13/14 seating-areas entry above (`0` = "configured, zero seats, nothing
+  bookable", distinct from `null` = unconfigured/unlimited), `lib/areas.js`'s
+  `isAreaFull`/`remainingAcrossAreas` correctly computed every time slot and every seating
+  chip as full, so the UI was disabling them exactly as designed. This is the same `test 2`
+  0-capacity state already found and deliberately left untouched during the 2026-10-13/14
+  session (noted as "apparently changed by the user between sessions"); this time the user
+  asked directly for a fix rather than just an explanation, so — after confirming with the
+  user rather than guessing their real seat counts — updated `restaurant_areas.capacity` via
+  direct SQL to real numbers they provided: Indoor 40, Outdoor 20, Shisha Terrace 15 (no
+  app code changed). **Verified live** after the update, in both English and Arabic: every
+  time slot shows "75 remaining" (40+20+15) and is tappable, all four seating-preference
+  chips (No preference/Indoor/Outdoor/Shisha Terrace) are tappable, and selecting an hour
+  (8 PM) and an area (Indoor) both visibly update the selected state correctly.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Resend is still in sandbox mode (discovered 2026-09-06/07, not yet fixed):** the
   project's confirmation emails go through Resend, and Resend's free/sandbox mode will
