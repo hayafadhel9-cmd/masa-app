@@ -1602,7 +1602,159 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     was deleted from the live project afterward (`booking_needs` cascaded with it) —
     confirmed 0 rows remain for that id.
 
+- **Restaurant dashboard rebuilt from `design/dashboard design.html` (2026-10-24):** the
+  dashboard's teal/ivory look is gone — new login/sign-up screens and a new six-tab
+  shell (Requests, Tonight, Upcoming, Receipts, Analytics, Settings) in Held's real
+  cream/burgundy/brass tokens, with Requests/Tonight/Upcoming fully wired to real
+  bookings data and Receipts/Analytics/Settings as explicit placeholders, per the
+  request's own scope.
+  - **Reading the design file:** it turned out to be a bundled React SPA (minified
+    React + app code inlined in one file), not static HTML, so grepping it wouldn't
+    reveal the actual screens. Served it locally (`python3 -m http.server`) and clicked
+    through every reachable screen/state in both languages via a background research
+    agent, producing a 400-line spec covering exact EN/AR copy, every interaction, and
+    the color-role mapping onto Held's real tokens — that spec is what the rest of this
+    entry was built from.
+  - **Login/sign-up** (`app/dashboard/login/page.js`, restyled, auth logic untouched):
+    cream background, burgundy serif "Held" wordmark + gold rule, tan pill inputs, eye
+    toggle, burgundy CTA — matches the diner app's existing `CustomerAuthForm` visual
+    language rather than introducing a new one. Sign-up now collects restaurant name and
+    the signer's own name up front (design's "RESTAURANT NAME"/"YOUR NAME" fields),
+    passed through `signUp`'s `options.data` as `pending_restaurant_name`/`full_name`;
+    `app/dashboard/settings/page.js`'s onboarding load effect now prefills the restaurant
+    name field from `pending_restaurant_name` when there's no restaurant row yet, so
+    onboarding doesn't ask for the name twice. Forgot-password flow unchanged.
+  - **Shell** (`app/dashboard/page.js`, full rewrite): burgundy-filled sidebar (the one
+    deliberately burgundy-not-cream surface in the whole dashboard, per the design), gold
+    wordmark + "FOR RESTAURANTS" label, six nav items each with an icon, a brass badge
+    circle on Requests showing the live pending count, active-row highlighting, language
+    toggle + sign out + restaurant name pinned at the bottom. A global "Taking
+    requests / Paused" switch sits top-right on every tab (new `restaurants
+    .accepting_requests` column) — pausing shows a grey notice under the page date and
+    fires a toast; **this does not yet gate the diner-facing booking flow** (the request
+    explicitly scoped this pass to the dashboard, not `app/page.js`) — a restaurant can
+    pause and guests can still technically book, worth flagging if the user wants that
+    closed next.
+  - **Requests tab** (`app/dashboard/_components/RequestsTab.js`): 4 stat tiles (Waiting,
+    Covers tonight, Arrived, Respond within — fixed at 15 min for this pass, see "Known
+    limitations" below), "Oldest first" divider, one card per pending request with the
+    guest's name, visit badge, needs badge, party/zone/card-last4/occasion meta, a
+    reused `lib/areas.js`-style "X of Y seats taken" capacity line
+    (`lib/zoneCapacity.js`), and a respond-by countdown that turns `warn`-red inside 5
+    minutes of the 15-minute SLA. Confirm is a direct action; Decline opens a modal with
+    the 4 exact reasons from the design (Fully booked / Can't seat that size / Closed
+    that day / Another reason), a live "{Guest} will see: ..." preview that updates per
+    reason, and on submit sets `status = 'declined'` plus a new `bookings.decline_reason`
+    column (the guest-facing message text — captured for future use even though the
+    diner app doesn't surface it yet). Both Confirm and Decline show a toast with Undo
+    (reverts `status` back to `'pending'`, clearing `decline_reason` on an undone
+    decline) — no new RLS needed, the existing owner-branch `bookings` UPDATE policy
+    already allows any status/column change for the restaurant's own bookings.
+  - **Tonight tab** (`TonightTab.js`): 4 stats (Bookings, Covers, Arrived, No shows),
+    bookings grouped by time slot, each row showing the same name/visit/needs badges plus
+    guests/zone/occasion. Not-yet-arrived rows get No show / Arrived buttons (new
+    `bookings.arrived` + `arrived_at` columns, separate from `status` so a booking stays
+    'confirmed' while tracking tonight's check-in state); arrived rows collapse to a
+    plain "Arrived" pill. No-show reuses the existing `no_show_fee_aed * party_size`
+    charge math exactly (same as the old dashboard's `markNoShow`), now behind a
+    confirmation modal matching the design, with a toast and deliberately no Undo (it's
+    a real charge, same no-undo precedent as the diner app's other charged-no-show flow).
+  - **Upcoming tab** (`UpcomingTab.js`): "Coming up" / "Past" segmented sub-tabs.
+    Coming up = `pending`/`confirmed` bookings strictly after today (today's own
+    bookings live on Tonight instead, a deliberate split from the old dashboard's
+    pending/confirmed tab grouping); Past = `dined`/`no-show`, both grouped by date with
+    a guest-count header. Coming-up rows show a plain "Confirmed" pill; Past rows show
+    "Dined" or "No show · AED {total} charged" (the no-show total is real, recomputed
+    from `no_show_fee_aed`; a "Paid AED N" pill for dined bookings was deliberately
+    **not** added — see "Known limitations" below).
+  - **Receipts / Analytics / Settings tabs** (`PlaceholderTab.js`): a short centered
+    "Coming soon" card, same pattern as the diner app's existing Payment-methods
+    placeholder — per the request, these three are explicitly out of scope this pass
+    even though the design file has them fully built out. Settings' placeholder adds an
+    "Open full settings" button linking to the real, already-built `/dashboard/settings`
+    page, so the existing onboarding/settings functionality stays reachable rather than
+    getting orphaned behind the new tab bar.
+  - **Guest needs icons + returning-guest badge** (`GuestBadges.js`,
+    `GuestNeedsModal.js`, `lib/guestVisits.js`): the needs badge reuses the real
+    `lib/diningNeeds.js` exactly (`hasDiningNeeds`, `diningNeedsFromRow`) and the
+    dashboard's already-established `Accessibility`/`Baby`/`Nut` lucide icons at burgundy
+    — one icon shown per guest (allergy takes priority, as the most safety-relevant,
+    then wheelchair, then high chair) with a tap opening a modal listing every need,
+    matching the pattern already built for the 2026-10-24 dining-needs bugfix above. The
+    visit badge ("• 4th visit" / "• الزيارة رقم 4") is computed client-side from the
+    restaurant's own already-loaded bookings — no new table — grouping by `user_id` or,
+    since that can be null on pre-account bookings, by `guest_phone`, counting
+    pending/confirmed/dined bookings only (a no-show or a declined request isn't a
+    "visit"); English uses an ordinal, Arabic uses a structurally different "visit
+    number N" construction, per the design — these aren't the same string translated,
+    `visitBadgeText()` builds each language's sentence shape directly rather than
+    routing both through one interpolated key.
+  - **Scope trims — things the design shows that this pass deliberately left out**,
+    because building them honestly would mean fabricating data the app doesn't actually
+    track (all consistent with Receipts/Analytics/Settings themselves being explicit
+    placeholders this pass): no "Table N" meta (the schema's `restaurant_tables` table
+    is legacy/unused, no real table-assignment feature exists); no min-spend meta
+    (no restaurant-level setting for it exists, and Settings — where it'd be configured
+    — is a placeholder); no "Paid AED N" pill for arrived/dined guests (no itemized
+    order/payment tracking exists anywhere in the app, only the no-show charge amount is
+    real data); the decline modal's three suggested-alternative-time chips (shown under
+    "Fully booked") aren't rendered — the design spec itself flagged these as
+    non-functional/decorative in the demo, and the request's own scope list didn't
+    include them.
+  - **Data model**: two migrations applied directly to the live project
+    (`cqckxtytqyvldqogpscy`, via the Supabase MCP tool) and mirrored into `schema.sql` —
+    `restaurants.accepting_requests` and `bookings.arrived`/`arrived_at`/
+    `decline_reason`. **No new RLS policies were needed anywhere** — the existing
+    owner-scoped UPDATE policies on both tables already cover every new column, verified
+    directly against the live project's actual policies (not assumed from the file) and
+    re-confirmed with `get_advisors` afterward: zero new findings, only the same three
+    pre-existing ones already documented elsewhere in this file. While checking, found
+    and fixed real drift in `schema.sql`: the live project has had `"Owners can create
+    their own restaurant"` (INSERT) and `"Owners can update their own restaurant"`
+    (UPDATE) policies on `restaurants` all along — they were just missing from this
+    file, the same kind of gap the 2026-08-29 note at the bottom of this file already
+    warned about. Both are now added back.
+  - **91 new translation keys**, EN/AR, for the dashboard rebuild specifically (281 total
+    now, parity-checked programmatically — no gaps, no duplicates). Arabic copy follows
+    the design spec's captured exact strings where available, translated consistently
+    with the app's existing direct/short tone elsewhere.
+  - **Tested live against the real project**, both languages: `next build` clean at every
+    stage. Login/sign-up screens tested directly (no auth needed). For the tab content,
+    reused the project's established throwaway-route technique (temporary route outside
+    `/dashboard` so middleware's gate doesn't apply, deleted before committing, `next
+    build` re-verified clean afterward) — but this time backed by **real** data: inserted
+    8 clearly-labeled real test bookings covering every state (pending/urgent,
+    pending/not-urgent, confirmed/not-arrived, confirmed/arrived, no-show tonight,
+    confirmed tomorrow, dined in the past, no-show in the past — two sharing a phone
+    number to also exercise the visit badge, one reusing the real "haya mousa" account
+    to anchor it against genuine history) plus `booking_needs` rows for two of them,
+    then rendered the real tab components against that real data. Confirmed: all four
+    stat tiles compute correctly, the urgency color threshold, the decline modal's live
+    preview updating per reason, the guest-needs modal, the no-show modal's real fee
+    math (AED 70 × 2 = AED 140), the arrived/no-show pill states, both Upcoming
+    sub-tabs with correct date grouping, and full RTL mirroring on every screen tested
+    (including the easy-to-get-backwards "وصل"/"لم يحضر" action-button forms vs.
+    "وصلوا"/"لم يحضروا" stat-label forms, which are genuinely different Arabic words, not
+    the same word reused — confirmed both render correctly in the right place). Also
+    confirmed the server-side `/dashboard` gate is still intact: an unauthenticated
+    `fetch` returns an opaque redirect, and — unexpectedly but usefully — this browser
+    profile already had a real, unrelated logged-in Supabase session with no restaurant
+    ownership, and navigating to `/dashboard` correctly redirected it to `/` exactly as
+    `middleware.js` is supposed to for a non-owner. All 8 test bookings (and their
+    `booking_needs` rows, cascaded) were deleted afterward — confirmed the restaurant's
+    booking count is back to its original 11.
+
 ## Known limitations / deliberate simplifications (not bugs)
+- **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
+  (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.
+  The design shows it as a per-restaurant setting, but Settings (where that would live)
+  is an explicit placeholder this pass, so there's nowhere to configure it yet — revisit
+  once Settings gets built out for real.
+- **Pausing "Taking requests" doesn't yet block new diner-side bookings (2026-10-24):**
+  `restaurants.accepting_requests` is real and the dashboard switch works, but
+  `app/page.js`'s booking flow doesn't check it — a guest can still submit a booking
+  while paused. The request scoped this pass to the dashboard only; closing this gap on
+  the diner side is a natural next step if the user wants the pause to actually pause.
 - **Weekly BestTime refresh cron won't authenticate in production yet (2026-10-23, not yet
   fixed):** `CRON_SECRET` and `FORECAST_SYNC_SECRET` (see the busyness-label entry above)
   were added to `.env.local` this session but not to Vercel's project env vars — until

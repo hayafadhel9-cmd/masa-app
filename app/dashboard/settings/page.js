@@ -113,6 +113,11 @@ function RestaurantSettingsInner() {
         setMaxAdvanceDays(data.max_advance_days ?? 30);
         setMaxPartySize(data.max_party_size ?? 14);
         await loadAreas(data.id);
+      } else if (userData.user?.user_metadata?.pending_restaurant_name) {
+        // First time here after signing up on the new dashboard sign-up
+        // screen (2026-10-24), which collects the restaurant name up front
+        // — carry it over so onboarding isn't asking for it twice.
+        setName(userData.user.user_metadata.pending_restaurant_name);
       }
       setCheckingAuth(false);
     }

@@ -1,44 +1,35 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../lib/supabase/client";
-import { Check, X, Clock, CalendarDays, LayoutDashboard, LogOut, Settings, Globe, Accessibility, Baby, Nut } from "lucide-react";
+import {
+  Inbox,
+  UtensilsCrossed,
+  CalendarDays,
+  Receipt,
+  BarChart3,
+  Settings as SettingsIcon,
+  LogOut,
+  Globe,
+} from "lucide-react";
 import { useLanguage } from "../../lib/LanguageContext";
-import { hasDiningNeeds, diningNeedsFromRow } from "../../lib/diningNeeds";
+import { computeVisitNumbers } from "../../lib/guestVisits";
+import GuestNeedsModal from "./_components/GuestNeedsModal";
+import Toast from "./_components/Toast";
+import RequestsTab from "./_components/RequestsTab";
+import TonightTab from "./_components/TonightTab";
+import UpcomingTab from "./_components/UpcomingTab";
+import PlaceholderTab from "./_components/PlaceholderTab";
 
-// Small tappable icon row shown next to a guest's name on every booking card
-// (Needs Response, Confirmed, and all three History sections) — one icon per
-// active need, burgundy at 16px, empty (renders nothing) when the booking
-// has none. Tapping opens the detail popover via `onOpen`, which is how the
-// allergy free-text gets surfaced (the icons alone are deliberately
-// unlabeled). Burgundy is a deliberate accent against the dashboard's own
-// teal/ivory palette — it's the same color the diner app uses for these same
-// three icons, so the icon identity reads the same on both sides.
-function NeedsIcons({ booking, onOpen, label }) {
-  // `booking_needs.booking_id` is this table's primary key, so PostgREST
-  // treats bookings -> booking_needs as a to-one embed: the API returns a
-  // single object (or null), never an array — `?.[0]` here would always be
-  // undefined and silently hide every icon, which is exactly the bug this
-  // comment is guarding against regressing.
-  const needs = diningNeedsFromRow(booking.booking_needs);
-  if (!hasDiningNeeds(needs)) return null;
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onOpen(booking, needs);
-      }}
-      className="inline-flex items-center gap-1 text-burgundy flex-shrink-0"
-      aria-label={label}
-    >
-      {needs.wheelchair && <Accessibility size={16} />}
-      {needs.highChair && <Baby size={16} />}
-      {needs.allergyOn && <Nut size={16} />}
-    </button>
-  );
-}
+const NAV_ITEMS = [
+  { key: "requests", labelKey: "navRequests", Icon: Inbox },
+  { key: "tonight", labelKey: "navTonight", Icon: UtensilsCrossed },
+  { key: "upcoming", labelKey: "navUpcoming", Icon: CalendarDays },
+  { key: "receipts", labelKey: "navReceipts", Icon: Receipt },
+  { key: "analytics", labelKey: "navAnalytics", Icon: BarChart3 },
+  { key: "settings", labelKey: "settingsLabel", Icon: SettingsIcon },
+];
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -47,12 +38,11 @@ export default function DashboardPage() {
   const [restaurants, setRestaurants] = useState([]);
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
-  const [activeTab, setActiveTab] = useState("needsResponse");
-  const [needsDetail, setNeedsDetail] = useState(null); // { booking, needs } | null
-
-  function openNeedsDetail(booking, needs) {
-    setNeedsDetail({ booking, needs });
-  }
+  const [areas, setAreas] = useState([]);
+  const [activeTab, setActiveTab] = useState("requests");
+  const [toast, setToast] = useState(null);
+  const [needsDetail, setNeedsDetail] = useState(null);
+  const [togglingAvailability, setTogglingAvailability] = useState(false);
 
   useEffect(() => {
     async function checkAuth() {
@@ -76,10 +66,17 @@ export default function DashboardPage() {
     const { data } = await supabase
       .from("bookings")
       .select("*, booking_needs(*)")
-      .eq("restaurant_id", restaurantId)
-      .order("booking_date")
-      .order("booking_time");
+      .eq("restaurant_id", restaurantId);
     setBookings(data || []);
+  }, []);
+
+  const loadAreas = useCallback(async (restaurantId) => {
+    if (!restaurantId) return;
+    const { data } = await supabase
+      .from("restaurant_areas")
+      .select("*")
+      .eq("restaurant_id", restaurantId);
+    setAreas(data || []);
   }, []);
 
   useEffect(() => {
@@ -98,7 +95,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadBookings(selected);
-  }, [selected, loadBookings]);
+    loadAreas(selected);
+  }, [selected, loadBookings, loadAreas]);
 
   useEffect(() => {
     if (!selected) return;
@@ -116,375 +114,187 @@ export default function DashboardPage() {
     };
   }, [selected, loadBookings]);
 
-  async function updateStatus(id, status) {
-    await supabase.from("bookings").update({ status }).eq("id", id);
-    loadBookings(selected);
-  }
-
-  async function markNoShow(id) {
-    await supabase.from("bookings").update({ status: "no-show", charged: true }).eq("id", id);
-    loadBookings(selected);
-  }
-
-  async function markDined(id) {
-    await supabase.from("bookings").update({ status: "dined" }).eq("id", id);
-    loadBookings(selected);
-  }
-
-  async function dismissNoShow(id) {
-    await supabase.from("bookings").update({ status: "settled" }).eq("id", id);
-    loadBookings(selected);
-  }
-
-  async function archiveCancelled(id) {
-    await supabase.from("bookings").update({ status: "archived" }).eq("id", id);
-    loadBookings(selected);
-  }
-
   const restaurant = restaurants.find((r) => r.id === selected);
-  const pending = bookings.filter((b) => b.status === "pending");
-  const confirmed = bookings.filter((b) => b.status === "confirmed");
-  const dined = bookings.filter((b) => b.status === "dined");
-  const noShows = bookings.filter((b) => b.status === "no-show");
-  const cancelled = bookings.filter((b) => b.status === "cancelled");
-  const platformCut = (fee) => Math.round(fee * 0.18);
+  const pendingCount = bookings.filter((b) => b.status === "pending").length;
+  const visitNumbers = useMemo(() => computeVisitNumbers(bookings), [bookings]);
 
-  const DASHBOARD_TABS = [
-    { key: "needsResponse", label: t("needsResponseTab"), count: pending.length },
-    { key: "confirmed", label: t("confirmedStatus"), count: confirmed.length },
-    { key: "history", label: t("historyTab"), count: dined.length + noShows.length + cancelled.length },
-  ];
-
-  if (checkingAuth) {
-    return <div className="min-h-screen bg-white flex items-center justify-center text-sm text-neutral-400">{t("loading")}</div>;
+  function showToast(message, onUndo) {
+    setToast({ message, onUndo });
   }
+
+  async function toggleAccepting() {
+    if (!restaurant) return;
+    const next = !restaurant.accepting_requests;
+    setTogglingAvailability(true);
+    await supabase.from("restaurants").update({ accepting_requests: next }).eq("id", restaurant.id);
+    setRestaurants((prev) => prev.map((r) => (r.id === restaurant.id ? { ...r, accepting_requests: next } : r)));
+    setTogglingAvailability(false);
+    showToast(next ? t("toastResumed") : t("toastPaused"), null);
+  }
+
+  if (checkingAuth || (!checkingAuth && restaurants.length === 0 && !selected)) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center text-sm text-taupe">{t("loading")}</div>
+    );
+  }
+
+  if (restaurants.length === 0) {
+    return (
+      <div className="min-h-screen bg-cream flex items-center justify-center px-6 text-center">
+        <p className="text-sm text-muted max-w-sm">{t("noRestaurantLinked")}</p>
+      </div>
+    );
+  }
+
+  const activeLabelKey = NAV_ITEMS.find((n) => n.key === activeTab)?.labelKey || "navRequests";
+  const todayLabel = new Intl.DateTimeFormat(lang === "ar" ? "ar" : "en-US", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(new Date());
 
   return (
-    <div className="mx-auto max-w-2xl min-h-screen bg-white">
-      <div className="px-6 py-4 flex items-center justify-between bg-teal">
-        <div className="flex items-center gap-2 text-ivory text-sm font-medium">
-          <LayoutDashboard size={18} className="text-brass" /> {t("partnerDashboard")}
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={selected || ""}
-            onChange={(e) => setSelected(e.target.value)}
-            className="text-xs rounded-md px-2 py-1 outline-none bg-teal text-ivory border border-white/20"
-          >
-            {restaurants.map((r) => (
-              <option key={r.id} value={r.id} className="text-ink">
-                {r.name}
-              </option>
-            ))}
-          </select>
+    <div className="min-h-screen bg-cream flex">
+      <aside className="w-60 flex-shrink-0 bg-burgundy text-tan flex flex-col px-5 py-6">
+        <div className="font-serif text-2xl text-brass font-extrabold leading-none mb-1">Held</div>
+        <div className="w-6 h-0.5 bg-brass mb-1.5" />
+        <div className="text-[10px] font-bold uppercase tracking-widest text-tan/70 mb-6">{t("forRestaurants")}</div>
+
+        <nav className="flex flex-col gap-1 flex-1">
+          {NAV_ITEMS.map(({ key, labelKey, Icon }) => {
+            const active = activeTab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-start ${
+                  active ? "bg-burgundyLight text-offwhite font-semibold" : "text-tan/80"
+                }`}
+              >
+                <Icon size={16} className="flex-shrink-0" />
+                <span className="flex-1">{t(labelKey)}</span>
+                {key === "requests" && pendingCount > 0 && (
+                  <span className="flex-shrink-0 min-w-[18px] h-[18px] rounded-full bg-brass text-burgundy text-[10px] font-bold flex items-center justify-center px-1">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="flex items-center gap-2 mb-4">
           <button
             onClick={() => setLang(lang === "en" ? "ar" : "en")}
-            className="flex items-center gap-1 text-xs rounded-full px-2 py-1 bg-white/10 text-ivory"
+            className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-offwhite/10 text-tan"
           >
             <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
           </button>
           <button
-            onClick={() => router.push("/dashboard/settings")}
-            className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
-            aria-label={t("settingsLabel")}
-          >
-            <Settings size={14} className="text-ivory" />
-          </button>
-          <button
             onClick={handleSignOut}
-            className="w-7 h-7 rounded-full flex items-center justify-center bg-white/10"
             aria-label={t("signOut")}
+            className="w-7 h-7 rounded-full flex items-center justify-center bg-offwhite/10 text-tan"
           >
-            <LogOut size={14} className="text-ivory" />
+            <LogOut size={14} />
           </button>
         </div>
-      </div>
 
-      {restaurants.length === 0 && (
-        <div className="px-6 py-10 text-sm text-neutral-500">
-          {t("noRestaurantLinked")}
-        </div>
-      )}
-
-      {restaurant && (
-        <div className="px-6 pt-5 pb-2">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-serif text-xl text-ink">{restaurant.name}</h2>
-            {restaurant.subscription_status === "trial" ? (
-              <span className="text-[10px] font-medium rounded-full px-2.5 py-1 bg-amber-100 text-amber-700">
-                {t("freeTrial")}
-              </span>
-            ) : (
-              <span className="text-[10px] font-medium rounded-full px-2.5 py-1 bg-green-100 text-green-700">
-                {t("activeSubscription")}
-              </span>
-            )}
-          </div>
-          <div className="flex gap-1.5">
-            {DASHBOARD_TABS.map((tabDef) => (
-              <button
-                key={tabDef.key}
-                onClick={() => setActiveTab(tabDef.key)}
-                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium ${
-                  activeTab === tabDef.key ? "bg-teal text-ivory" : "bg-neutral-100 text-neutral-600"
-                }`}
-              >
-                {tabDef.label}
-                <span
-                  className={`text-[10px] rounded-full px-1.5 min-w-[16px] text-center ${
-                    activeTab === tabDef.key ? "bg-white/20" : "bg-white"
-                  }`}
-                >
-                  {tabDef.count}
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="px-6 pb-10">
-        {activeTab === "needsResponse" && (
-        <>
-        {pending.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">{t("noNewRequests")}</p>
-        )}
-
-        <div className="flex flex-col gap-2 mb-5">
-          {pending.map((b) => (
-            <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-amber-50 border border-amber-100">
-              <div>
-                <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name}
-                  <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
-                  · {t("guestsCount", { count: b.party_size })}
-                  {b.occasion && (
-                    <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-200 text-amber-800">
-                      {b.occasion}
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs flex items-center gap-1 mt-0.5 text-neutral-500">
-                  <Clock size={11} /> {b.booking_date} · {b.booking_time} · {b.zone} · {b.guest_phone}
-                </div>
-              </div>
-              <div className="flex gap-1.5">
-                <button
-                  onClick={() => updateStatus(b.id, "confirmed")}
-                  className="w-8 h-8 rounded-full flex items-center justify-center bg-teal"
-                >
-                  <Check size={15} className="text-brass" />
-                </button>
-                <button
-                  onClick={() => updateStatus(b.id, "declined")}
-                  className="w-8 h-8 rounded-full flex items-center justify-center bg-neutral-200"
-                >
-                  <X size={15} className="text-neutral-600" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        </>
-        )}
-
-        {activeTab === "confirmed" && (
-        <>
-        {confirmed.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">{t("noConfirmedYet")}</p>
-        )}
-        <div className="flex flex-col gap-2">
-          {confirmed.map((b) => (
-            <div key={b.id} className="rounded-lg p-3 flex items-center justify-between bg-green-50 border border-green-100">
-              <div>
-                <div className="text-sm font-medium text-ink flex items-center gap-2">
-                  {b.guest_name}
-                  <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
-                  · {t("guestsCount", { count: b.party_size })}
-                  {b.occasion && (
-                    <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                      {b.occasion}
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs flex items-center gap-1 mt-0.5 text-neutral-500">
-                  <CalendarDays size={11} /> {b.booking_date} · {b.booking_time} · {b.zone} · card •••• {b.card_last4}
-                </div>
-              </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                <button
-                  onClick={() => markDined(b.id)}
-                  className="text-[10px] rounded-full px-2 py-1 bg-teal text-ivory"
-                >
-                  {t("markDined")}
-                </button>
-                <button
-                  onClick={() => markNoShow(b.id)}
-                  className="text-[10px] rounded-full px-2 py-1 bg-amber-100 text-amber-700"
-                >
-                  {t("markNoShow")}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-        </>
-        )}
-
-        {activeTab === "history" && (
-        <>
-        {dined.length === 0 && noShows.length === 0 && cancelled.length === 0 && (
-          <p className="text-xs py-3 text-neutral-400">{t("noHistoryYet")}</p>
-        )}
-
-        {dined.length > 0 && (
-          <>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-widest font-medium text-teal">{t("dined")}</span>
-              <span className="text-[10px] rounded-full px-1.5 bg-teal/10 text-teal">{dined.length}</span>
-            </div>
-            <div className="flex flex-col gap-2 mb-5">
-              {dined.map((b) => (
-                <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200">
-                  <div className="text-sm font-medium text-neutral-600 flex items-center gap-2">
-                    {b.guest_name}
-                    <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
-                    · {t("guestsCount", { count: b.party_size })}
-                    {b.occasion && (
-                      <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                        {b.occasion}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-xs mt-0.5 text-neutral-400">
-                    {b.booking_date} · {b.booking_time} · {b.zone}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {noShows.length > 0 && (
-          <>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-[10px] uppercase tracking-widest font-medium text-red-700">
-                {t("chargedNoShows")}
-              </span>
-              <span className="text-[10px] rounded-full px-1.5 bg-red-100 text-red-700">{noShows.length}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {noShows.map((b) => {
-                const total = restaurant.no_show_fee_aed * b.party_size;
-                const cut = platformCut(total);
-                return (
-                  <div key={b.id} className="rounded-lg p-3 bg-red-50 border border-red-100">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-ink flex items-center gap-2">
-                        {b.guest_name}
-                        <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
-                        · {t("guestsCount", { count: b.party_size })}
-                        {b.occasion && (
-                          <span className="text-[10px] rounded-full px-2 py-0.5 bg-amber-100 text-amber-700">
-                            {b.occasion}
-                          </span>
-                        )}
-                      </span>
-                      <span className="text-xs font-medium text-red-700">{t("chargedAed", { amount: total })}</span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <div className="text-[11px] text-neutral-500">
-                        {t("restaurantKeepsFee", { keep: total - cut, fee: cut })}
-                      </div>
-                      <button
-                        onClick={() => dismissNoShow(b.id)}
-                        className="text-[10px] rounded-full px-2 py-1 bg-white border border-red-200 text-red-700"
-                      >
-                        {t("dismiss")}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-
-        {cancelled.length > 0 && (
-          <>
-            <div className="flex items-center gap-2 mb-2 mt-5">
-              <span className="text-[10px] uppercase tracking-widest font-medium text-neutral-500">
-                {t("cancelledByGuest")}
-              </span>
-              <span className="text-[10px] rounded-full px-1.5 bg-neutral-200 text-neutral-600">{cancelled.length}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {cancelled.map((b) => (
-                <div key={b.id} className="rounded-lg p-3 bg-neutral-50 border border-neutral-200 flex items-center justify-between">
-                  <div className="flex items-center justify-between flex-1">
-                    <span className="text-sm font-medium text-neutral-500 flex items-center gap-2">
-                      {b.guest_name}
-                      <NeedsIcons booking={b} onOpen={openNeedsDetail} label={t("diningNeeds")} />
-                      · {t("guestsCount", { count: b.party_size })}
-                    </span>
-                    <span className="text-xs text-neutral-400">{b.booking_date} · {b.booking_time} · {t("tableFreed")}</span>
-                  </div>
-                  <button
-                    onClick={() => archiveCancelled(b.id)}
-                    className="w-6 h-6 rounded-full flex items-center justify-center bg-neutral-200 ml-3 flex-shrink-0"
-                    aria-label={t("dismiss")}
-                  >
-                    <X size={13} className="text-neutral-600" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-        </>
-        )}
-      </div>
-
-      {needsDetail && (
-        <div
-          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center px-6"
-          onClick={() => setNeedsDetail(null)}
-        >
-          <div
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl"
-            onClick={(e) => e.stopPropagation()}
+        {restaurants.length > 1 ? (
+          <select
+            value={selected || ""}
+            onChange={(e) => setSelected(e.target.value)}
+            className="text-sm rounded-lg px-2 py-1.5 bg-burgundyLight text-offwhite border border-offwhite/20"
           >
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="font-serif text-lg text-ink">{t("diningNeeds")}</h3>
-              <button onClick={() => setNeedsDetail(null)} aria-label={t("dismiss")}>
-                <X size={16} className="text-neutral-500" />
-              </button>
+            {restaurants.map((r) => (
+              <option key={r.id} value={r.id} className="text-charcoal">
+                {r.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          restaurant && (
+            <div>
+              <div className="font-serif text-base text-offwhite">{restaurant.name}</div>
+              {restaurant.area && <div className="text-xs text-tan/70">{restaurant.area}</div>}
             </div>
-            <p className="text-xs text-neutral-500 mb-4">{needsDetail.booking.guest_name}</p>
-            <div className="flex flex-col gap-2.5 text-sm text-ink">
-              {needsDetail.needs.wheelchair && (
-                <div className="flex items-center gap-2">
-                  <Accessibility size={16} className="text-burgundy flex-shrink-0" /> {t("wheelchairAccess")}
-                </div>
-              )}
-              {needsDetail.needs.highChair && (
-                <div className="flex items-center gap-2">
-                  <Baby size={16} className="text-burgundy flex-shrink-0" /> {t("highChairNeed")}
-                </div>
-              )}
-              {needsDetail.needs.allergyOn && (
-                <div className="flex items-start gap-2">
-                  <Nut size={16} className="text-burgundy flex-shrink-0 mt-0.5" />
-                  <span>
-                    {t("allergyNeed")}
-                    {needsDetail.needs.allergy ? `: ${needsDetail.needs.allergy}` : ""}
-                  </span>
-                </div>
-              )}
-            </div>
+          )
+        )}
+      </aside>
+
+      <main className="flex-1 min-w-0 px-8 py-8 overflow-y-auto">
+        <div className="flex items-start justify-between gap-4 mb-7">
+          <div>
+            <h1 className="font-serif text-3xl text-charcoal">{t(activeLabelKey)}</h1>
+            <p className="text-sm text-muted mt-1">{todayLabel}</p>
+            {!restaurant.accepting_requests && <p className="text-xs text-warn mt-1">{t("pausedNotice")}</p>}
           </div>
+          <button
+            type="button"
+            onClick={toggleAccepting}
+            disabled={togglingAvailability}
+            className="flex items-center gap-2.5 flex-shrink-0 disabled:opacity-60"
+          >
+            <span className="text-sm font-medium text-charcoal">
+              {restaurant.accepting_requests ? t("takingRequests") : t("requestsPaused")}
+            </span>
+            <span
+              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${
+                restaurant.accepting_requests ? "bg-green-700" : "bg-tan"
+              }`}
+            >
+              <span
+                className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                  restaurant.accepting_requests ? "translate-x-5 rtl:-translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </span>
+          </button>
         </div>
-      )}
+
+        {activeTab === "requests" && (
+          <RequestsTab
+            bookings={bookings}
+            areas={areas}
+            lang={lang}
+            t={t}
+            reload={() => loadBookings(selected)}
+            showToast={showToast}
+            openNeedsModal={setNeedsDetail}
+            visitNumbers={visitNumbers}
+          />
+        )}
+        {activeTab === "tonight" && (
+          <TonightTab
+            restaurant={restaurant}
+            bookings={bookings}
+            lang={lang}
+            t={t}
+            reload={() => loadBookings(selected)}
+            showToast={showToast}
+            openNeedsModal={setNeedsDetail}
+            visitNumbers={visitNumbers}
+          />
+        )}
+        {activeTab === "upcoming" && (
+          <UpcomingTab
+            restaurant={restaurant}
+            bookings={bookings}
+            lang={lang}
+            t={t}
+            openNeedsModal={setNeedsDetail}
+            visitNumbers={visitNumbers}
+          />
+        )}
+        {activeTab === "receipts" && <PlaceholderTab t={t} />}
+        {activeTab === "analytics" && <PlaceholderTab t={t} />}
+        {activeTab === "settings" && (
+          <PlaceholderTab t={t} ctaLabel={t("openFullSettings")} onCta={() => router.push("/dashboard/settings")} />
+        )}
+      </main>
+
+      <GuestNeedsModal detail={needsDetail} onClose={() => setNeedsDetail(null)} t={t} />
+      <Toast toast={toast} onDismiss={() => setToast(null)} t={t} />
     </div>
   );
 }

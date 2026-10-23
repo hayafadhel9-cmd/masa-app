@@ -3,11 +3,45 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase/client";
-import { LayoutDashboard, Mail, Lock, Globe, MailCheck, Eye, EyeOff, AlertTriangle } from "lucide-react";
+import { Mail, Lock, User, Store, MailCheck, Eye, EyeOff, AlertTriangle } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../../../lib/passwordRules";
 import { useCapsLockWarning } from "../../../lib/useCapsLockWarning";
 import { authErrorMessage } from "../../../lib/authErrorMessage";
+
+function Wordmark() {
+  return (
+    <div className="mb-6">
+      <div className="font-serif text-[32px] font-extrabold text-burgundy leading-none">Held</div>
+      <div className="w-8 h-0.5 bg-brass mt-2.5" />
+    </div>
+  );
+}
+
+function FieldLabel({ children }) {
+  return <label className="text-[10px] font-bold uppercase tracking-widest text-taupe">{children}</label>;
+}
+
+function FieldShell({ icon, children }) {
+  return (
+    <div className="flex items-center gap-2 rounded-full px-4 py-3 mt-2 bg-tan">
+      {icon}
+      {children}
+    </div>
+  );
+}
+
+function LangToggle({ lang, setLang }) {
+  return (
+    <button
+      type="button"
+      onClick={() => setLang(lang === "en" ? "ar" : "en")}
+      className="w-full text-center text-xs text-taupe underline mt-10"
+    >
+      {lang === "en" ? "العربية" : "English"}
+    </button>
+  );
+}
 
 export default function DashboardLoginPage() {
   const router = useRouter();
@@ -15,6 +49,8 @@ export default function DashboardLoginPage() {
   const [mode, setMode] = useState("login"); // "login" | "signup" | "forgot"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [restaurantName, setRestaurantName] = useState("");
+  const [fullName, setFullName] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const { capsLockOn, checkCapsLock } = useCapsLockWarning();
   const [error, setError] = useState("");
@@ -46,7 +82,11 @@ export default function DashboardLoginPage() {
     }
 
     setLoading(true);
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({ email, password });
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: fullName, pending_restaurant_name: restaurantName } },
+    });
     setLoading(false);
     if (signUpError) {
       setError(authErrorMessage(signUpError, t));
@@ -57,7 +97,8 @@ export default function DashboardLoginPage() {
       // Email confirmation is required on this project — there's no active
       // session yet, so the restaurant row can't be created until they
       // confirm and log in (see handleSave in settings/page.js for the
-      // first-time-insert path that runs at that point).
+      // first-time-insert path that runs at that point, which prefills the
+      // name from pending_restaurant_name above).
       setConfirmationPending(true);
       return;
     }
@@ -82,26 +123,26 @@ export default function DashboardLoginPage() {
 
   if (confirmationPending) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16 text-center">
-        <MailCheck size={32} className="text-teal mx-auto mb-4" />
-        <h1 className="font-serif text-xl text-ink mb-2">{t("confirmEmailTitle")}</h1>
-        <p className="text-sm text-neutral-500">{t("confirmEmailBody", { email })}</p>
+      <div className="mx-auto max-w-sm min-h-screen bg-cream px-6 pt-16 text-center">
+        <MailCheck size={32} className="text-burgundy mx-auto mb-4" />
+        <h1 className="font-serif text-xl text-charcoal mb-2">{t("confirmEmailTitle")}</h1>
+        <p className="text-sm text-muted">{t("confirmEmailBody", { email })}</p>
       </div>
     );
   }
 
   if (resetLinkSent) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16 text-center">
-        <MailCheck size={32} className="text-teal mx-auto mb-4" />
-        <h1 className="font-serif text-xl text-ink mb-2">{t("resetLinkSentTitle")}</h1>
-        <p className="text-sm text-neutral-500 mb-6">{t("resetLinkSentBody", { email })}</p>
+      <div className="mx-auto max-w-sm min-h-screen bg-cream px-6 pt-16 text-center">
+        <MailCheck size={32} className="text-burgundy mx-auto mb-4" />
+        <h1 className="font-serif text-xl text-charcoal mb-2">{t("resetLinkSentTitle")}</h1>
+        <p className="text-sm text-muted mb-6">{t("resetLinkSentBody", { email })}</p>
         <button
           onClick={() => {
             setResetLinkSent(false);
             setMode("login");
           }}
-          className="text-xs text-neutral-500 underline"
+          className="text-xs text-burgundy underline font-medium"
         >
           {t("backToSignIn")}
         </button>
@@ -111,43 +152,32 @@ export default function DashboardLoginPage() {
 
   if (mode === "forgot") {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16">
-        <div className="flex items-center justify-between mb-1">
-          <div className="flex items-center gap-2">
-            <LayoutDashboard size={20} className="text-teal" />
-            <h1 className="font-serif text-2xl text-ink">{t("resetPasswordTitle")}</h1>
-          </div>
-          <button
-            onClick={() => setLang(lang === "en" ? "ar" : "en")}
-            className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
-          >
-            <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
-          </button>
-        </div>
-        <p className="text-sm text-neutral-500 mb-6">{t("forgotPasswordSubtitle")}</p>
+      <div className="mx-auto max-w-sm min-h-screen bg-cream px-6 pt-16 pb-10">
+        <Wordmark />
+        <h1 className="font-serif text-2xl text-charcoal mb-1">{t("resetPasswordTitle")}</h1>
+        <p className="text-sm text-muted mb-6">{t("forgotPasswordSubtitle")}</p>
 
         <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
           <div>
-            <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("email")}</label>
-            <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
-              <Mail size={15} className="text-neutral-400" />
+            <FieldLabel>{t("email")}</FieldLabel>
+            <FieldShell icon={<Mail size={15} className="text-taupe flex-shrink-0" />}>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@restaurant.com"
-                className="flex-1 bg-transparent outline-none text-sm"
+                className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
                 required
               />
-            </div>
+            </FieldShell>
           </div>
 
-          {error && <p className="text-xs text-red-600">{error}</p>}
+          {error && <p className="text-xs text-warn">{error}</p>}
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory disabled:opacity-60"
+            className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
           >
             {loading ? t("pleaseWait") : t("sendResetLink")}
           </button>
@@ -158,52 +188,147 @@ export default function DashboardLoginPage() {
             setMode("login");
             setError("");
           }}
-          className="w-full text-center text-xs mt-5 text-neutral-500 underline"
+          className="w-full text-center text-xs mt-5 text-burgundy underline font-medium"
         >
           {t("backToSignIn")}
         </button>
+        <LangToggle lang={lang} setLang={setLang} />
+      </div>
+    );
+  }
+
+  if (mode === "signup") {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-cream px-6 pt-16 pb-10">
+        <Wordmark />
+        <h1 className="font-serif text-2xl text-charcoal mb-1">{t("setUpRestaurant")}</h1>
+        <p className="text-sm text-muted mb-6">{t("createStaffAccountSubtitle")}</p>
+
+        <form onSubmit={handleSignup} className="flex flex-col gap-4">
+          <div>
+            <FieldLabel>{t("restaurantName")}</FieldLabel>
+            <FieldShell icon={<Store size={15} className="text-taupe flex-shrink-0" />}>
+              <input
+                value={restaurantName}
+                onChange={(e) => setRestaurantName(e.target.value)}
+                placeholder={t("restaurantNamePlaceholder")}
+                className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
+                required
+              />
+            </FieldShell>
+          </div>
+
+          <div>
+            <FieldLabel>{t("yourName")}</FieldLabel>
+            <FieldShell icon={<User size={15} className="text-taupe flex-shrink-0" />}>
+              <input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
+                required
+              />
+            </FieldShell>
+          </div>
+
+          <div>
+            <FieldLabel>{t("workEmail")}</FieldLabel>
+            <FieldShell icon={<Mail size={15} className="text-taupe flex-shrink-0" />}>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@restaurant.com"
+                className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
+                required
+              />
+            </FieldShell>
+          </div>
+
+          <div>
+            <FieldLabel>{t("password")}</FieldLabel>
+            <FieldShell icon={<Lock size={15} className="text-taupe flex-shrink-0" />}>
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={checkCapsLock}
+                onKeyUp={checkCapsLock}
+                placeholder="••••••••"
+                className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
+                required
+                minLength={PASSWORD_MIN_LENGTH}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? t("hidePassword") : t("showPassword")}
+                className="text-taupe flex-shrink-0"
+              >
+                {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
+            </FieldShell>
+            {capsLockOn && (
+              <p className="text-[11px] text-warn mt-1.5 flex items-center gap-1">
+                <AlertTriangle size={11} /> {t("capsLockWarning")}
+              </p>
+            )}
+            <p className="text-[11px] text-taupe mt-1.5">{t("passwordMinHint", { min: PASSWORD_MIN_LENGTH })}</p>
+          </div>
+
+          {error && <p className="text-xs text-warn">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60 mt-1"
+          >
+            {loading ? t("pleaseWait") : t("createAccount")}
+          </button>
+        </form>
+
+        <div className="h-px bg-charcoal/[0.08] my-6" />
+
+        <p className="text-center text-sm text-muted">
+          {t("alreadyHaveAccount")}{" "}
+          <button
+            onClick={() => {
+              setMode("login");
+              setError("");
+            }}
+            className="text-burgundy font-semibold"
+          >
+            {t("signIn")}
+          </button>
+        </p>
+        <LangToggle lang={lang} setLang={setLang} />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-6 pt-16">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <LayoutDashboard size={20} className="text-teal" />
-          <h1 className="font-serif text-2xl text-ink">{t("partnerLogin")}</h1>
-        </div>
-        <button
-          onClick={() => setLang(lang === "en" ? "ar" : "en")}
-          className="flex items-center gap-1 text-xs rounded-full px-2.5 py-1.5 bg-white border border-neutral-200 flex-shrink-0"
-        >
-          <Globe size={12} /> {lang === "en" ? "عربي" : "EN"}
-        </button>
-      </div>
-      <p className="text-sm text-neutral-500 mb-6">
-        {mode === "login" ? t("signInSubtitle") : t("signUpSubtitle")}
-      </p>
+    <div className="mx-auto max-w-sm min-h-screen bg-cream px-6 pt-16 pb-10">
+      <Wordmark />
+      <h1 className="font-serif text-2xl text-charcoal mb-1">{t("partnerLogin")}</h1>
+      <p className="text-sm text-muted mb-6">{t("dashSignInSubtitle")}</p>
 
-      <form onSubmit={mode === "login" ? handleLogin : handleSignup} className="flex flex-col gap-4">
+      <form onSubmit={handleLogin} className="flex flex-col gap-4">
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("email")}</label>
-          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
-            <Mail size={15} className="text-neutral-400" />
+          <FieldLabel>{t("email")}</FieldLabel>
+          <FieldShell icon={<Mail size={15} className="text-taupe flex-shrink-0" />}>
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@restaurant.com"
-              className="flex-1 bg-transparent outline-none text-sm"
+              className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
               required
             />
-          </div>
+          </FieldShell>
         </div>
 
         <div>
-          <label className="text-[10px] uppercase tracking-widest text-neutral-400">{t("password")}</label>
-          <div className="flex items-center gap-2 rounded-lg px-3 py-2.5 mt-2 bg-white border border-neutral-200">
-            <Lock size={15} className="text-neutral-400" />
+          <FieldLabel>{t("password")}</FieldLabel>
+          <FieldShell icon={<Lock size={15} className="text-taupe flex-shrink-0" />}>
             <input
               type={showPassword ? "text" : "password"}
               value={password}
@@ -211,7 +336,7 @@ export default function DashboardLoginPage() {
               onKeyDown={checkCapsLock}
               onKeyUp={checkCapsLock}
               placeholder="••••••••"
-              className="flex-1 bg-transparent outline-none text-sm"
+              className="flex-1 bg-transparent outline-none text-sm text-charcoal placeholder:text-taupe"
               required
               minLength={PASSWORD_MIN_LENGTH}
             />
@@ -219,53 +344,55 @@ export default function DashboardLoginPage() {
               type="button"
               onClick={() => setShowPassword((v) => !v)}
               aria-label={showPassword ? t("hidePassword") : t("showPassword")}
-              className="text-neutral-400 flex-shrink-0"
+              className="text-taupe flex-shrink-0"
             >
               {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
             </button>
-          </div>
+          </FieldShell>
           {capsLockOn && (
-            <p className="text-[11px] text-red-600 mt-1.5 flex items-center gap-1">
+            <p className="text-[11px] text-warn mt-1.5 flex items-center gap-1">
               <AlertTriangle size={11} /> {t("capsLockWarning")}
             </p>
           )}
-          {mode === "signup" && (
-            <p className="text-[11px] text-neutral-400 mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
-          )}
-          {mode === "login" && (
-            <button
-              type="button"
-              onClick={() => {
-                setMode("forgot");
-                setError("");
-              }}
-              className="text-[11px] text-neutral-500 underline mt-1.5"
-            >
-              {t("forgotPassword")}
-            </button>
-          )}
         </div>
 
-        {error && <p className="text-xs text-red-600">{error}</p>}
+        {error && <p className="text-xs text-warn">{error}</p>}
 
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-full py-3 text-sm font-medium bg-teal text-ivory disabled:opacity-60"
+          className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
         >
-          {loading ? t("pleaseWait") : mode === "login" ? t("signIn") : t("createAccount")}
+          {loading ? t("pleaseWait") : t("signIn")}
         </button>
       </form>
 
       <button
+        type="button"
         onClick={() => {
-          setMode(mode === "login" ? "signup" : "login");
+          setMode("forgot");
           setError("");
         }}
-        className="w-full text-center text-xs mt-5 text-neutral-500 underline"
+        className="w-full text-center text-xs mt-4 text-muted underline"
       >
-        {mode === "login" ? t("newRestaurantSignUp") : t("haveAccountSignIn")}
+        {t("forgotPassword")}
       </button>
+
+      <div className="h-px bg-charcoal/[0.08] my-6" />
+
+      <p className="text-center text-sm text-muted">
+        {t("newToHeld")}{" "}
+        <button
+          onClick={() => {
+            setMode("signup");
+            setError("");
+          }}
+          className="text-burgundy font-semibold"
+        >
+          {t("createAccount")}
+        </button>
+      </p>
+      <LangToggle lang={lang} setLang={setLang} />
     </div>
   );
 }

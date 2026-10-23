@@ -33,6 +33,10 @@ create table restaurants (
   max_advance_days integer default 30,
   max_party_size integer default 14,
   zone_capacity jsonb default '{}'::jsonb,  -- superseded, see note above
+  -- Dashboard-wide "Taking requests / Paused" switch (2026-10-24 dashboard
+  -- rebuild) — when false, the Requests tab shows a paused notice. Diner-app
+  -- booking creation is NOT gated by this yet (out of scope for that pass).
+  accepting_requests boolean not null default true,
   created_at timestamp with time zone default now()
 );
 
@@ -93,6 +97,15 @@ create table bookings (
   card_last4 text,                -- from Stripe, never store full card numbers
   stripe_payment_method_id text,  -- Stripe token reference, added when you wire up Stripe
   charged boolean default false,
+  -- Tonight-tab check-in state (2026-10-24 dashboard rebuild) — separate from
+  -- `status` so a booking can stay 'confirmed' while tracking whether the
+  -- party has actually arrived tonight.
+  arrived boolean not null default false,
+  arrived_at timestamp with time zone,
+  -- Guest-facing message shown when a request is declined (e.g. "We're full
+  -- at 8:00 PM. Please try another time.") — captured for future use even
+  -- though the diner app doesn't surface it yet; cleared on undo.
+  decline_reason text,
   created_at timestamp with time zone default now()
 );
 
@@ -140,6 +153,20 @@ alter table bookings enable row level security;
 create policy "Public can view restaurants"
   on restaurants for select
   using (true);
+
+-- These two were live on the project already (created alongside the original
+-- owner_id/onboarding work) but had fallen out of this file — added back
+-- here during the 2026-10-24 dashboard rebuild after verifying them against
+-- the live project's actual policies, per the standing note at the bottom of
+-- this file about schema.sql drift.
+create policy "Owners can create their own restaurant"
+  on restaurants for insert
+  with check (auth.uid() = owner_id);
+
+create policy "Owners can update their own restaurant"
+  on restaurants for update
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
 
 -- Bookings RLS (tightened 2026-08-29 alongside real customer accounts — see
 -- PROJECT_STATUS.md's security section for the full reasoning and the
