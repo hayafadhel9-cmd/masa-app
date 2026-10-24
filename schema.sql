@@ -80,7 +80,14 @@ create table menu_items (
   name text not null,
   price_aed integer not null,
   sort_order integer default 0,
-  photo_url text  -- public URL of the uploaded photo in the menu-photos storage bucket
+  photo_url text,  -- public URL of the uploaded photo in the menu-photos storage bucket
+  staff_only boolean not null default false  -- hidden from the diner-facing menu
+                                              -- (Restaurant Detail's "View menu" sheet),
+                                              -- but still selectable by staff when
+                                              -- building a guest's receipt
+                                              -- (ReceiptPanel) — same public-read RLS
+                                              -- as every other column here, no
+                                              -- separate policy needed
 );
 
 -- Bookings made by diners

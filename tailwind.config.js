@@ -28,6 +28,19 @@ module.exports = {
       fontFamily: {
         serif: ["Georgia", "Cambria", "serif"],
       },
+      keyframes: {
+        // Restaurant Detail's "Tonight" time cards — staggered per-card via
+        // an inline animationDelay, only applied through the motion-safe:
+        // variant so prefers-reduced-motion users get the final state with
+        // no animation at all (see the fade-up usage in app/page.js).
+        fadeUp: {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+      },
+      animation: {
+        "fade-up": "fadeUp 0.4s ease-out backwards",
+      },
     },
   },
   plugins: [],

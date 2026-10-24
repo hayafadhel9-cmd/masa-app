@@ -146,6 +146,7 @@ export default function SettingsForm({
   const [newDishPrice, setNewDishPrice] = useState("");
   const [newDishFile, setNewDishFile] = useState(null);
   const [newDishPreview, setNewDishPreview] = useState("");
+  const [newDishStaffOnly, setNewDishStaffOnly] = useState(false);
   const [addingDish, setAddingDish] = useState(false);
 
   // The one confirm sheet currently pending — { title, description,
@@ -264,11 +265,13 @@ export default function SettingsForm({
         price_aed: Number(newDishPrice),
         sort_order: menuItems.length,
         photo_url,
+        staff_only: newDishStaffOnly,
       });
       setNewDishName("");
       setNewDishPrice("");
       setNewDishFile(null);
       setNewDishPreview("");
+      setNewDishStaffOnly(false);
       await loadMenuItems(restaurant.id);
     } catch (err) {
       alert("Photo upload failed: " + err.message);
@@ -702,6 +705,15 @@ export default function SettingsForm({
                 className="w-20 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
               />
             </div>
+            <label className="flex items-center gap-2 mb-2 min-h-[44px] px-1 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={newDishStaffOnly}
+                onChange={(e) => setNewDishStaffOnly(e.target.checked)}
+                className="w-4 h-4 accent-burgundy flex-shrink-0"
+              />
+              {t("staffOnlyDish")}
+            </label>
             <button
               type="button"
               onClick={addMenuItem}
@@ -877,6 +889,7 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
   const [price, setPrice] = useState(item.price_aed);
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(item.photo_url || "");
+  const [staffOnly, setStaffOnly] = useState(item.staff_only || false);
   const [saving, setSaving] = useState(false);
 
   function handleFile(e) {
@@ -898,11 +911,12 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
     setPreview(item.photo_url || "");
     setName(item.name);
     setPrice(item.price_aed);
+    setStaffOnly(item.staff_only || false);
   }
 
   async function handleSave() {
     setSaving(true);
-    await onSave(item, { name: name.trim(), price_aed: Number(price) }, file);
+    await onSave(item, { name: name.trim(), price_aed: Number(price), staff_only: staffOnly }, file);
     setSaving(false);
     setFile(null);
     setEditing(false);
@@ -920,7 +934,10 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
         )}
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-charcoal truncate">{item.name}</div>
-          <div className="text-xs text-brass font-semibold">AED {item.price_aed}</div>
+          <div className="text-xs text-brass font-semibold">
+            AED {item.price_aed}
+            {item.staff_only && <span className="text-taupe font-normal"> · {t("staffOnlyDish")}</span>}
+          </div>
         </div>
         <button
           type="button"
@@ -961,6 +978,15 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
           className="w-20 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
         />
       </div>
+      <label className="flex items-center gap-2 mb-2 min-h-[44px] px-1 text-xs text-muted">
+        <input
+          type="checkbox"
+          checked={staffOnly}
+          onChange={(e) => setStaffOnly(e.target.checked)}
+          className="w-4 h-4 accent-burgundy flex-shrink-0"
+        />
+        {t("staffOnlyDish")}
+      </label>
       <div className="flex gap-2">
         <button
           type="button"

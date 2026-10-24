@@ -11,7 +11,9 @@ import {
   diningNeedsRowForInsert,
   diningNeedsFromRow,
 } from "../lib/diningNeeds";
-import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../lib/timeSlots";
+import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot, isSlotUpcoming } from "../lib/timeSlots";
+import { isOpenNow, formatClockLabel } from "../lib/openStatus";
+import MenuSheet from "./components/MenuSheet";
 import { useLanguage } from "../lib/LanguageContext";
 import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
 import { useCapsLockWarning } from "../lib/useCapsLockWarning";
@@ -530,6 +532,15 @@ export default function DinerPage() {
   const [submittingRating, setSubmittingRating] = useState(false);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
   const [activeRestaurantRating, setActiveRestaurantRating] = useState(null);
+  // Restaurant Detail's "Tonight" row — a quick-pick time for *today*
+  // specifically, kept separate from `time`/`bookingDate` (which the actual
+  // booking flow uses, defaulted by openRestaurant() to today + the
+  // restaurant's own min_advance_days) so tapping a tonight card never
+  // silently changes the booking flow's defaults until the diner actually
+  // taps "Book for <time>" on the floating book bar.
+  const [selectedTonightTime, setSelectedTonightTime] = useState(null);
+  const [tonightAvailability, setTonightAvailability] = useState({});
+  const [menuSheetOpen, setMenuSheetOpen] = useState(false);
   const [editingBooking, setEditingBooking] = useState(null);
   const [editParty, setEditParty] = useState(2);
   const [editTime, setEditTime] = useState("");
@@ -726,6 +737,8 @@ export default function DinerPage() {
     const defaultDate = addDays(new Date(), r.min_advance_days ?? 0);
     setBookingDate(toLocalDateStr(defaultDate));
     setParty(2);
+    setSelectedTonightTime(null);
+    setMenuSheetOpen(false);
     if (user && hasDiningNeeds(accountNeeds)) {
       setBookNeeds(accountNeeds);
       setNeedsFromAccount(true);
@@ -795,6 +808,41 @@ export default function DinerPage() {
       loadTimeAvailability();
     }
   }, [screen, active, areas, bookingDate]);
+
+  // Same shape as loadTimeAvailability above, but hardcoded to *today's*
+  // date rather than `bookingDate` — the Restaurant Detail screen's
+  // "Tonight" row is always about tonight specifically, regardless of what
+  // date the booking flow itself currently defaults to (a restaurant with
+  // min_advance_days > 0 defaults `bookingDate` to a later day).
+  async function loadTonightAvailability() {
+    if (!active) return;
+    if (!allAreasConfigured(areas)) {
+      setTonightAvailability({});
+      return;
+    }
+    const { data } = await supabase
+      .from("bookings")
+      .select("zone, booking_time")
+      .eq("restaurant_id", active.id)
+      .eq("booking_date", toLocalDateStr(new Date()))
+      .in("status", ["pending", "confirmed"]);
+    const counts = {};
+    (data || []).forEach((b) => {
+      counts[b.booking_time] = counts[b.booking_time] || {};
+      counts[b.booking_time][b.zone] = (counts[b.booking_time][b.zone] || 0) + 1;
+    });
+    const availability = {};
+    generateTimeSlots(active.opening_time, active.closing_time).forEach((slot) => {
+      availability[slot] = remainingAcrossAreas(areas, counts[slot] || {});
+    });
+    setTonightAvailability(availability);
+  }
+
+  useEffect(() => {
+    if (screen === "restaurant" && active) {
+      loadTonightAvailability();
+    }
+  }, [screen, active, areas]);
 
   async function loadAreaAvailability() {
     if (!active || areas.length < 2) {
@@ -1220,8 +1268,48 @@ export default function DinerPage() {
   const accountDisplayName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || t("guest");
   const accountAvatarInitial = accountDisplayName.trim().charAt(0).toUpperCase() || "?";
 
+  // Restaurant Detail screen — derived from `active`/`areas`/`tonightAvailability`,
+  // computed fresh each render rather than cached in state since none of this
+  // changes the booking flow's own state until the diner actually taps "Book".
+  const isRestaurantDetailScreen = tab === "discover" && screen === "restaurant";
+  const isOpen = active ? isOpenNow(active.opening_time, active.closing_time) : false;
+  const tonightSlots = active
+    ? generateTimeSlots(active.opening_time, active.closing_time)
+        .filter((slot) => isSlotUpcoming(slot, active.opening_time, active.closing_time))
+        .filter((slot) => tonightAvailability[slot] !== 0)
+        .map((slot) => {
+          const [slotTime, slotPeriod] = slot.split(" ");
+          const occupancy = occupancyPctForSlot(areas, tonightAvailability[slot]);
+          return { slot, time: slotTime, period: slotPeriod, almostFull: occupancy != null && occupancy >= 80 };
+        })
+    : [];
+  const visibleMenuItems = menuItems.filter((m) => !m.staff_only);
+  const menuPhotoItems = visibleMenuItems.filter((m) => m.photo_url);
+  const lowestMenuPrice =
+    visibleMenuItems.length > 0 ? Math.min(...visibleMenuItems.map((m) => m.price_aed)) : null;
+  const minSpendTonightActive =
+    !!active && active.min_spend_aed > 0 && (active.min_spend_nights || []).includes(new Date().getDay());
+
+  function openDirections() {
+    if (!active) return;
+    const query = active.address || `${active.name}, ${active.area}`;
+    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, "_blank", "noopener,noreferrer");
+  }
+
+  function handleBookTap() {
+    if (selectedTonightTime) {
+      setBookingDate(toLocalDateStr(new Date()));
+      setTime(selectedTonightTime);
+    }
+    setScreen("book");
+  }
+
   return (
-    <div className="mx-auto max-w-md min-h-screen bg-cream px-5 pb-28 relative flex flex-col">
+    <div
+      className={`mx-auto min-h-screen bg-cream pb-28 relative flex flex-col ${
+        isRestaurantDetailScreen ? "max-w-[600px] px-6" : "max-w-md px-5"
+      }`}
+    >
       {tab === "discover" && screen === "home" && (
         <>
           <div className="font-serif text-[52px] font-extrabold text-burgundy leading-none pt-6">Held</div>
@@ -1268,82 +1356,128 @@ export default function DinerPage() {
 
       {tab === "discover" && screen === "restaurant" && active && (
         <div className="pt-4">
-          <button onClick={() => setScreen("home")} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
-            <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
-          </button>
+          <div className="flex items-center justify-between mb-4">
+            <button onClick={() => setScreen("home")} className="flex items-center gap-1 text-sm text-burgundy py-2 font-medium">
+              <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+            </button>
+            <button
+              onClick={() => setLang(lang === "en" ? "ar" : "en")}
+              className="text-xs text-taupe font-medium py-2"
+            >
+              {lang === "en" ? "العربية" : "English"}
+            </button>
+          </div>
 
-          <h2 className="font-serif text-2xl text-charcoal mt-2">{active.name}</h2>
-          {activeRestaurantRating && (
-            <div className="flex mt-1.5">
-              <span className="flex items-center gap-1" style={{ direction: "ltr" }}>
-                <RatingStar average={activeRestaurantRating.average} size={14} />
-                <span className="text-xs font-semibold text-charcoal">
-                  {activeRestaurantRating.average.toFixed(1)}
+          <div className="flex items-center gap-1.5 text-xs text-muted mb-2">
+            {activeRestaurantRating && (
+              <>
+                <span className="flex items-center gap-1" style={{ direction: "ltr" }}>
+                  <RatingStar average={activeRestaurantRating.average} size={13} />
+                  <span className="font-bold text-charcoal">{activeRestaurantRating.average.toFixed(1)}</span>
                 </span>
-              </span>
-            </div>
-          )}
-          <div className="text-xs mt-2 text-muted">
-            {active.cuisine} · {active.price_tier}
-          </div>
-          <div className="text-xs mt-1.5 mb-1 flex items-center gap-2 text-muted">
-            <MapPin size={12} /> {active.area}
-            {active.address ? ` · ${active.address}` : ""}
-          </div>
-          <div className="text-xs mb-5 flex items-center gap-2 text-muted">
-            <Clock size={12} /> {active.opening_time?.slice(0, 5) || "18:00"}–{active.closing_time?.slice(0, 5) || "21:30"}
+                <span className="text-taupe">·</span>
+              </>
+            )}
+            <span>{active.cuisine}</span>
+            <span className="text-taupe">·</span>
+            <span>{active.price_tier}</span>
           </div>
 
-          {trackingTimeAvailability && (
+          <h1 className="font-serif text-charcoal leading-tight text-[30px] sm:text-[38px]">{active.name}</h1>
+          <div className="w-10 h-[3px] rounded-full bg-brass mt-3 mb-4" />
+
+          <div className="flex flex-wrap gap-2 mb-7">
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-tan bg-card px-3.5 py-2 text-xs">
+              <Clock size={14} className={isOpen ? "text-green-700" : "text-taupe"} />
+              {isOpen ? (
+                <span>
+                  <span className="text-green-700 font-semibold">{t("openStatus")}</span>{" "}
+                  <span className="text-charcoal">
+                    {formatClockLabel(active.opening_time, t)} {t("to")} {formatClockLabel(active.closing_time, t)}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-taupe font-semibold">{t("closedStatus")}</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={openDirections}
+              className="inline-flex items-center gap-1.5 rounded-full border border-tan bg-card px-3.5 py-2 text-xs text-charcoal"
+            >
+              <MapPin size={14} className="text-taupe flex-shrink-0" />
+              <span>
+                {active.area}, Dubai <span className="text-taupe">· {t("directions")}</span>
+              </span>
+            </button>
+          </div>
+
+          {tonightSlots.length > 0 && (
             <>
-              <div className="text-[11px] font-bold uppercase tracking-widest mb-3 text-taupe">
-                {t("availableTonight")}
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("tonightLabel")}</span>
+                <span className="text-xs text-taupe">{t("timesOpenCount", { count: tonightSlots.length })}</span>
               </div>
-              <div className="flex flex-wrap gap-2 mb-6">
-                {generateTimeSlots(active.opening_time, active.closing_time).map((tm) => {
-                  const remaining = timeAvailability[tm];
-                  const full = remaining === 0;
+              <div className="flex gap-2.5 overflow-x-auto pb-1" style={EDGE_FADE_STYLE}>
+                {tonightSlots.map((s, i) => {
+                  const selected = selectedTonightTime === s.slot;
                   return (
-                    <div
-                      key={tm}
-                      className={`rounded-full px-3 py-1.5 text-xs font-medium ${
-                        full ? "bg-tan/50 text-taupe" : "bg-tan text-charcoal"
+                    <button
+                      key={s.slot}
+                      type="button"
+                      onClick={() => setSelectedTonightTime(s.slot)}
+                      style={{ animationDelay: `${i * 50}ms` }}
+                      className={`motion-safe:animate-fade-up shrink-0 min-w-[64px] rounded-2xl px-3.5 py-3 flex flex-col items-center ${
+                        selected ? "bg-burgundy text-offwhite" : "bg-card border border-tan text-charcoal"
                       }`}
                     >
-                      {tm}
-                    </div>
+                      <span className="text-base font-bold">{s.time}</span>
+                      {s.almostFull ? (
+                        <span className={`text-[10px] font-semibold mt-0.5 ${selected ? "text-offwhite" : "text-brass"}`}>
+                          {t("almostFull")}
+                        </span>
+                      ) : (
+                        <span className={`text-[10px] mt-0.5 ${selected ? "text-offwhite/70" : "text-taupe"}`}>
+                          {s.period}
+                        </span>
+                      )}
+                    </button>
                   );
                 })}
               </div>
+              <p className="text-xs text-taupe mt-2 mb-7">{t("pickAnotherDayHint")}</p>
             </>
           )}
 
-          <div className="text-[11px] font-bold uppercase tracking-widest mb-3 text-taupe">
-            {t("menuHighlights")}
-          </div>
-          <div className="flex flex-col gap-2 mb-6">
-            {menuItems.length === 0 && (
-              <p className="text-sm text-taupe">{t("noMenuItems")}</p>
-            )}
-            {menuItems.map((m) => (
-              <div key={m.id} className="flex items-center gap-3 text-sm py-2.5 px-3 rounded-2xl bg-card">
-                {m.photo_url ? (
-                  <img src={m.photo_url} alt={m.name} className="w-11 h-11 rounded-lg object-cover flex-shrink-0" />
-                ) : (
-                  <div className="w-11 h-11 rounded-lg bg-tan flex-shrink-0" />
-                )}
-                <span className="text-charcoal flex-1">{m.name}</span>
-                <span className="text-brass font-medium">AED {m.price_aed}</span>
+          {visibleMenuItems.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setMenuSheetOpen(true)}
+              className="w-full flex items-center gap-3 rounded-2xl bg-card border border-tan px-4 py-3.5 mb-7"
+            >
+              {menuPhotoItems.length > 0 && (
+                <div className="flex flex-shrink-0">
+                  {menuPhotoItems.slice(0, 3).map((m, i) => (
+                    <img
+                      key={m.id}
+                      src={m.photo_url}
+                      alt=""
+                      className={`w-10 h-10 rounded-full object-cover border-2 border-card ${i > 0 ? "-ms-3" : ""}`}
+                    />
+                  ))}
+                </div>
+              )}
+              <div className="flex-1 min-w-0 text-start">
+                <div className="font-serif text-base text-charcoal">{t("viewMenu")}</div>
+                <div className="text-xs text-taupe">
+                  {t("dishesFromPrice", { count: visibleMenuItems.length, price: lowestMenuPrice })}
+                </div>
               </div>
-            ))}
-          </div>
+              <ChevronRight size={18} className="text-taupe rtl:rotate-180 flex-shrink-0" />
+            </button>
+          )}
 
-          <button
-            onClick={() => setScreen("book")}
-            className="w-full rounded-full py-4 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]"
-          >
-            {t("reserveTable")}
-          </button>
+          <div className="h-28" />
         </div>
       )}
 
@@ -2143,35 +2277,57 @@ export default function DinerPage() {
         </div>
       )}
 
-      <div className="fixed left-0 right-0 bottom-0 bg-cream border-t border-charcoal/[0.08] flex pb-3.5 pt-2">
-        <button
-          onClick={() => setTab("discover")}
-          className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
-            tab === "discover" ? "text-burgundy" : "text-taupe"
-          }`}
-        >
-          <Compass size={20} />
-          {t("discover")}
-        </button>
-        <button
-          onClick={() => setTab("myBookings")}
-          className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
-            tab === "myBookings" ? "text-burgundy" : "text-taupe"
-          }`}
-        >
-          <BookMarked size={20} />
-          {t("myBookings")}
-        </button>
-        <button
-          onClick={() => setTab("account")}
-          className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
-            tab === "account" ? "text-burgundy" : "text-taupe"
-          }`}
-        >
-          <User size={20} />
-          {t("account")}
-        </button>
+      <div className="fixed left-0 right-0 bottom-0">
+        {isRestaurantDetailScreen && (
+          <div className="mx-auto w-full max-w-[600px] px-6 pb-2">
+            <div className="rounded-[24px] bg-cream/85 backdrop-blur-md border border-tan/60 shadow-[0_8px_24px_rgba(43,31,33,0.18)] px-4 pt-3 pb-3.5">
+              {minSpendTonightActive && (
+                <div className="text-[11px] text-taupe text-center pb-2 mb-2.5 border-b border-charcoal/[0.08]">
+                  {t("minSpendTonight", { amount: active.min_spend_aed })}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={handleBookTap}
+                className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]"
+              >
+                {selectedTonightTime ? t("bookForTime", { time: selectedTonightTime }) : t("bookTable")}
+              </button>
+            </div>
+          </div>
+        )}
+        <div className="bg-cream border-t border-charcoal/[0.08] flex pb-3.5 pt-2">
+          <button
+            onClick={() => setTab("discover")}
+            className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
+              tab === "discover" ? "text-burgundy" : "text-taupe"
+            }`}
+          >
+            <Compass size={20} />
+            {t("discover")}
+          </button>
+          <button
+            onClick={() => setTab("myBookings")}
+            className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
+              tab === "myBookings" ? "text-burgundy" : "text-taupe"
+            }`}
+          >
+            <BookMarked size={20} />
+            {t("myBookings")}
+          </button>
+          <button
+            onClick={() => setTab("account")}
+            className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
+              tab === "account" ? "text-burgundy" : "text-taupe"
+            }`}
+          >
+            <User size={20} />
+            {t("account")}
+          </button>
+        </div>
       </div>
+
+      <MenuSheet open={menuSheetOpen} items={visibleMenuItems} t={t} onClose={() => setMenuSheetOpen(false)} />
 
       {ratingPromptBooking && (
         <RatingPromptModal

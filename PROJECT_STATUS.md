@@ -1968,6 +1968,109 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     gotcha from earlier in this project), fixed each time by a fresh reload rather than
     relying on Chrome's translate state.
 
+- **Restaurant Detail screen (the diner page before booking) redesigned from scratch
+  (2026-10-24):** `app/page.js`'s `screen === "restaurant"` block, matching a detailed
+  layout/visual spec — header, fact chips, a "Tonight" quick-pick row, a menu bottom
+  sheet, and a floating sticky book bar — built with Held's existing brand tokens, not
+  new literal hex values. Booking logic itself is untouched: the booking screen
+  (`screen === "book"`), `handleSave`-equivalent `confirmBooking`, and every existing
+  piece of state it reads (`time`, `bookingDate`, `party`, `seatingChoice`,
+  `timeAvailability`) keep the exact same shape and defaults as before.
+  - **Centered 600px column, this screen only**: the root wrapper
+    (`max-w-md px-5` everywhere else) switches to `max-w-[600px] px-6` only when
+    `tab === "discover" && screen === "restaurant"` — same per-screen-override pattern
+    used for the dashboard Settings restyle earlier today.
+  - **Header**: gold-star rating (reusing the existing `RatingStar` component, which
+    already renders exactly one proportionally-filled star) + bold average, cuisine,
+    price tier on one grey line; serif name; a 40×3px rounded gold rule. Two fact
+    chips — an Open/Closed pill (new `lib/openStatus.js`: `isOpenNow()`, handling a
+    restaurant whose hours cross midnight the same way `lib/timeSlots.js` already does;
+    `formatClockLabel()` for "6 PM" / "midnight" / "noon" display) and a Directions
+    chip that opens Google Maps (`maps/search/?api=1&query=<address>`) in a new tab —
+    live-verified it resolves to the real address (Al Fahidi Historical Neighbourhood).
+    The area chip appends ", Dubai" statically, since every restaurant on Held is in
+    Dubai by design (judgment call, flagged here rather than silently assumed).
+  - **"Tonight" row**: real per-slot availability for *today specifically* — a new
+    `tonightAvailability` state loaded independently of the booking flow's own
+    `timeAvailability`/`bookingDate` (which can default to a later day when a
+    restaurant's `min_advance_days > 0`), via a new `loadTonightAvailability()` that
+    mirrors the existing `loadTimeAvailability()` but is hardcoded to today's date.
+    Full slots are filtered out entirely (`tonightAvailability[slot] !== 0`); a slot
+    at ≥80% occupancy (via the existing `occupancyPctForSlot`) shows gold "Almost
+    full" instead of AM/PM. Already-passed times are filtered too — new
+    `lib/timeSlots.js` exports `slotToMinutes()` and `isSlotUpcoming()`, the latter
+    handling the actually-tricky part: a restaurant whose window crosses midnight
+    needs two independent wrap decisions (the slot's own clock value, and separately
+    whether "now" is genuinely still inside *last night's* post-midnight spillover) —
+    a single shared wrap, tried first, incorrectly hid every tonight slot whenever
+    "now" was simply before opening on an ordinary day (e.g. checking at noon for a
+    restaurant that opens at 6pm numerically looks like "1am, long after every slot"
+    under a naive single-wrap comparison). Caught and fixed during live testing, see
+    below. Cards fade up staggered on load (`motion-safe:animate-fade-up`, a new
+    keyframe in `tailwind.config.js` — reduced-motion users get the final state
+    immediately with no animation, by construction: the keyframe's 0% opacity never
+    applies to begin with when `motion-safe:` doesn't match). Tapping a card sets a
+    new `selectedTonightTime` — deliberately kept separate from the booking flow's own
+    `time`/`bookingDate` state, only written into them at the moment the diner taps
+    "Book for `<time>`" on the book bar, so a tonight tap can never silently change the
+    booking screen's defaults on its own.
+  - **Menu button + sheet**: up to 3 overlapping circular dish photos (logical
+    `-ms-3` spacing, mirrors automatically in RTL), "View menu" + dish count + lowest
+    price, opening a new `app/components/MenuSheet.js` — modeled on the existing
+    `ConfirmSheet`'s own mount/animate/Esc/backdrop-click behavior, with a scrollable
+    photo+name+price list and a "Close" button instead of a single confirm action.
+    **Staff-only dishes are filtered out** of both the button's count/price and the
+    sheet's list — a genuinely new concept this spec introduced, so it needed real
+    support, not just inert filtering logic: a new `menu_items.staff_only boolean not
+    null default false` column (migration applied + mirrored into `schema.sql`, no new
+    RLS needed — same public-read policy as every other menu_items column, re-checked
+    with `get_advisors`, no new findings) with a "Staff only" checkbox added to both
+    the add-dish and edit-dish forms in `SettingsForm.js` (`newDishStaffOnly` state,
+    `patch.staff_only` on save). Staff still see and can add staff-only items from
+    `ReceiptPanel` — it fetches `menu_items` with `select("*")` like everywhere else,
+    unfiltered; only the diner-facing Restaurant Detail screen filters.
+  - **Floating sticky book bar**: a translucent/blurred cream pill
+    (`bg-cream/85 backdrop-blur-md`) floating above the tab bar, restructured so both
+    live inside one shared `fixed left-0 right-0 bottom-0` container (the tab bar lost
+    its own `fixed` positioning; the book bar renders conditionally above it in normal
+    block flow) rather than guessing the tab bar's pixel height. Shows a grey minimum-
+    spend line only on nights the restaurant's own `min_spend_nights` includes today,
+    then "Book a table" or "Book for `<time>`" — tapping it sets `bookingDate` to
+    today and `time` to the picked slot only when one was picked, otherwise behaves
+    exactly like the old inline "Continue" button (`setScreen("book")`, no state
+    changes). Replaces that old full-width inline button; its `reserveTable`
+    translation key (and the now-superseded `menuHighlights`/`availableTonight` keys
+    from the old inline grid/list) were removed as unused — `t("noMenuItems")` stays,
+    still used by `SettingsForm`/`ReceiptPanel`.
+  - **17 new translation keys added, 3 removed**, EN/AR (333 total now, parity-checked
+    — no gaps, no duplicates).
+  - **Tested live against the real project**, both languages, at 1440px, 1024-width-
+    equivalent, and the narrowest width Chrome's own window-resize floor allows
+    (500px — same ~500px floor hit during the Settings-page restyle earlier today;
+    390px itself isn't reachable, but 500px already exercises the same sub-600px
+    layout). Found and fixed the isSlotUpcoming cross-midnight bug above (it hid every
+    "Tonight" slot whenever checked before a restaurant's opening hour on an ordinary
+    day) and a stale-HMR `__webpack_modules__[moduleId] is not a function` runtime
+    error (same known dev-server corruption pattern as earlier sessions — a clean
+    `rm -rf .next` + restart resolved it, not an app bug). Verified with real
+    data: the real restaurant's 2 real menu items/photos, a temporarily-added
+    staff-only test dish (confirmed excluded from the menu button's count and the
+    sheet, deleted after), a temporary min-spend-tonight value (confirmed the grey
+    line and reverted after), and temporary near-capacity/full test bookings at two
+    specific tonight slots (confirmed "Almost full" at ~87% occupancy and confirmed a
+    100%-full slot is fully hidden from the row, both sets of test bookings deleted
+    after — final state re-confirmed back to the original 12 bookings/2 menu items/
+    default hours and min spend). Confirmed the Open/Closed chip, both the green
+    "Open midnight to 11:59 PM" and grey "Closed" states. Confirmed Directions opens
+    real Google Maps resolving to the restaurant's actual address. Confirmed full
+    RTL mirroring throughout — header order, chip order, card scroll direction, menu
+    photo stacking, book bar button/text sides, tab bar — hit the same Chrome
+    auto-translate gotcha noted in the Settings-restyle entry above (a leftover
+    `ar` value in `localStorage` from that earlier session got silently
+    retranslated back to garbled English on first load), fixed by setting
+    `masa_lang` back to a clean value and reloading rather than trusting Chrome's
+    translate state.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.
