@@ -1805,6 +1805,97 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     both English and Arabic (RTL mirrored throughout, verified directly since this form
     happened to load in Arabic first from a prior test's `localStorage` state).
 
+- **Receipts and Analytics tabs built for real, with real order tracking (2026-10-24):**
+  the last two placeholder tabs from the dashboard rebuild. This is the first time the
+  app tracks what a table actually ordered, not just that a booking happened.
+  - **Receipts tab** (`app/dashboard/_components/ReceiptsTab.js`): date navigator
+    (prev/next arrows, defaulting to tonight) over the real `relativeDateLabel` helper
+    already used elsewhere, a header showing real Billed/Still-to-collect totals for
+    that night (computed from receipts, not fabricated — "still to collect" excludes
+    already-paid tabs), and one row per booking that has a tab (`receipt_status` not
+    null) with its live total and status pill. Tapping a row opens the same receipt
+    editor Tonight uses.
+  - **Tonight tab changed too**: marking a guest "Arrived" now also opens their tab
+    (`receipt_status: 'open'`) and immediately pops the receipt editor — arriving a
+    guest is, in practice, the moment staff seat them and start ordering. The generic
+    "Arrived" pill from the 2026-10-24 dashboard-rebuild entry above is gone; the
+    post-arrival state now shows the real status (Open tab / Paid / Not paid,
+    color-coded) and tapping it reopens the editor. This resolves that entry's own
+    deferred-to-Receipts note.
+  - **`ReceiptPanel`** (`app/dashboard/_components/ReceiptPanel.js`), shared by Tonight
+    and Receipts: tap a menu item chip to add it to the tab (repeat taps increment
+    quantity rather than adding duplicate rows); each line has a +/- stepper and a
+    remove button. Live Subtotal / VAT (5%) / minimum-spend top-up (only shown when
+    the shortfall is actually positive) / Total, all computed, never stored — see
+    `lib/receipts.js` below. "Mark as paid" / "Mark as not paid" when the tab is open;
+    once set, a single "Reopen tab" button to correct a mistake.
+  - **Analytics tab** (`AnalyticsTab.js`): Today / This week / This month — the latter
+    two are **rolling windows ending today** (last 7 / 30 days, today included), not
+    calendar week/month, to sidestep locale-specific week-start conventions (Fri/Sat
+    weekend vs. Sun-start) without having to encode one. Four stats — Revenue (sum of
+    every receipted booking's total in the window, paid or not — this is sales
+    generated, not cash collected, which is what Receipts' own Still-to-collect figure
+    already covers), Average per guest, Guests served, and Minimum spend reached
+    (`reached / applicable`, "—" when minimum spend never applied in the window at
+    all) — plus a **busiest-times-by-hour bar chart** and a **top-selling-items list**.
+    Both the chart and the top-items list are computed purely from already-loaded
+    `bookings`/`order_items`, no new queries.
+  - **Followed the `dataviz` skill for the bar chart**: single-series magnitude data
+    → sequential form, one hue (`brass`, already this app's established
+    "intensity/magnitude" color — see the diner app's busyness dots), bars capped at
+    22px with a 4px rounded top and a square baseline, a hairline baseline rule. Ran the
+    skill's own contrast checker (`validate_palette.js`'s `contrast()` export) against
+    this app's real surfaces first: brass-on-cream and brass-on-card both came back
+    under the 3:1 mark-contrast floor (1.98 / 2.23) — a WARN that the skill says is
+    "not dismissable" without a relief channel, so every bar carries an
+    always-visible count label at its tip rather than a hover-only value, which
+    satisfies it. Deliberately kept the stat-tile numbers in `font-serif` rather than
+    the skill's generic "sans semibold" default — this app's own numeric-display
+    convention (serif, already shipped on every other stat tile in Requests/Tonight)
+    is a legitimate per-design-system parameter the skill explicitly allows swapping,
+    and consistency with already-shipped tiles in the same dashboard wins over a
+    generic default.
+  - **Data model**: `bookings.receipt_status`/`receipt_paid_at` (payment state — on
+    `bookings` directly, not a separate 1:1 `receipts` table, same reasoning as
+    `arrived`/`arrived_at` before it, already covered by the existing owner-scoped
+    `bookings` UPDATE policy) and a genuinely new table, **`order_items`** (line items,
+    snapshotting name/price at add-time the same way `bookings.card_last4` already
+    snapshots a point-in-time value, so a later menu price change never rewrites a past
+    receipt). `order_items` has its own RLS — restaurant-staff-only, no diner-facing
+    read path at all (unlike `bookings`/`booking_needs`, which diners can read their own
+    rows of): verified against the live project with `set local role anon` inside a
+    rolled-back transaction, confirming 0 rows visible, and `get_advisors` shows no new
+    findings. Both migrations applied directly to the live project and mirrored into
+    `schema.sql`.
+  - **16 new translation keys**, EN/AR (309 total now, parity-checked — no gaps, no
+    duplicates). Deleted `PlaceholderTab.js` (no longer used anywhere — Receipts,
+    Analytics, and Settings are all real now) and its now-dead `comingSoon`/
+    `dashboardPlaceholderBody` wiring on this screen (`comingSoon` itself stays; the
+    diner app's Payment-methods placeholder still uses it).
+  - **Old historical bookings don't retroactively get receipts** — `receipt_status` is
+    null on every booking that existed before this feature, so they correctly don't
+    appear in Receipts or count toward Analytics. This is expected, not a gap to fix:
+    there's no real order data to backfill for them.
+  - **Tested live against the real project**, both languages: `next build` clean, then
+    the same throwaway-route-plus-real-data technique as the rest of this session's
+    2026-10-24 work (deleted before committing, `next build` re-verified clean) —
+    6 real test bookings across today/-7 days/-20 days with real `order_items`, and the
+    restaurant's `min_spend_aed`/`min_spend_nights` temporarily set to 150/Saturday to
+    exercise the top-up math, both reverted afterward (confirmed 0 leftover
+    `order_items`, `min_spend_aed` back to 0, booking count back to 11). Hand-verified
+    the arithmetic end-to-end, not just that numbers appeared: a 2-guest tab with AED
+    155 of items against a 150/guest minimum correctly showed a 145 top-up and a 308
+    total (155 + 8 VAT + 145); Receipts' Billed/Still-to-collect totals matched the sum
+    of the three visible receipts exactly; Analytics' Revenue matched Receipts' Billed
+    figure for the same day; widening the period from Today to This week correctly
+    added nothing (the one extra fixture booking landed 7 days back, one day outside a
+    last-7-days-including-today window — confirms the window boundary, not a bug) and
+    This month correctly picked up both older bookings, with the busiest-times chart
+    and top-items list recalculating correctly across all three periods. Also confirmed
+    in Arabic: status pills, the receipt editor (fully mirrored, RTL-correct line-item
+    layout), and the busiest-times chart (bars and hour labels both in reading-order
+    for RTL).
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.

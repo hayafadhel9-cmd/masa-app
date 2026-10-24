@@ -20,7 +20,9 @@ import Toast from "./_components/Toast";
 import RequestsTab from "./_components/RequestsTab";
 import TonightTab from "./_components/TonightTab";
 import UpcomingTab from "./_components/UpcomingTab";
-import PlaceholderTab from "./_components/PlaceholderTab";
+import ReceiptsTab from "./_components/ReceiptsTab";
+import AnalyticsTab from "./_components/AnalyticsTab";
+import ReceiptPanel from "./_components/ReceiptPanel";
 import SettingsTab from "./_components/SettingsTab";
 
 const NAV_ITEMS = [
@@ -40,9 +42,11 @@ export default function DashboardPage() {
   const [selected, setSelected] = useState(null);
   const [bookings, setBookings] = useState([]);
   const [areas, setAreas] = useState([]);
+  const [menuItems, setMenuItems] = useState([]);
   const [activeTab, setActiveTab] = useState("requests");
   const [toast, setToast] = useState(null);
   const [needsDetail, setNeedsDetail] = useState(null);
+  const [openReceiptId, setOpenReceiptId] = useState(null);
   const [togglingAvailability, setTogglingAvailability] = useState(false);
 
   useEffect(() => {
@@ -66,7 +70,7 @@ export default function DashboardPage() {
     if (!restaurantId) return;
     const { data } = await supabase
       .from("bookings")
-      .select("*, booking_needs(*)")
+      .select("*, booking_needs(*), order_items(*)")
       .eq("restaurant_id", restaurantId);
     setBookings(data || []);
   }, []);
@@ -78,6 +82,16 @@ export default function DashboardPage() {
       .select("*")
       .eq("restaurant_id", restaurantId);
     setAreas(data || []);
+  }, []);
+
+  const loadMenuItems = useCallback(async (restaurantId) => {
+    if (!restaurantId) return;
+    const { data } = await supabase
+      .from("menu_items")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .order("sort_order");
+    setMenuItems(data || []);
   }, []);
 
   useEffect(() => {
@@ -97,7 +111,8 @@ export default function DashboardPage() {
   useEffect(() => {
     loadBookings(selected);
     loadAreas(selected);
-  }, [selected, loadBookings, loadAreas]);
+    loadMenuItems(selected);
+  }, [selected, loadBookings, loadAreas, loadMenuItems]);
 
   useEffect(() => {
     if (!selected) return;
@@ -118,6 +133,11 @@ export default function DashboardPage() {
   const restaurant = restaurants.find((r) => r.id === selected);
   const pendingCount = bookings.filter((b) => b.status === "pending").length;
   const visitNumbers = useMemo(() => computeVisitNumbers(bookings), [bookings]);
+  // Looked up fresh from `bookings` on every render (not a snapshot taken
+  // when the panel opened) so edits inside ReceiptPanel — which reload the
+  // whole bookings list — are reflected immediately instead of the panel
+  // showing stale line items until it's closed and reopened.
+  const openReceiptBooking = bookings.find((b) => b.id === openReceiptId) || null;
 
   function showToast(message, onUndo) {
     setToast({ message, onUndo });
@@ -275,6 +295,7 @@ export default function DashboardPage() {
             reload={() => loadBookings(selected)}
             showToast={showToast}
             openNeedsModal={setNeedsDetail}
+            openReceipt={setOpenReceiptId}
             visitNumbers={visitNumbers}
           />
         )}
@@ -288,8 +309,10 @@ export default function DashboardPage() {
             visitNumbers={visitNumbers}
           />
         )}
-        {activeTab === "receipts" && <PlaceholderTab t={t} />}
-        {activeTab === "analytics" && <PlaceholderTab t={t} />}
+        {activeTab === "receipts" && (
+          <ReceiptsTab restaurant={restaurant} bookings={bookings} lang={lang} t={t} openReceipt={setOpenReceiptId} />
+        )}
+        {activeTab === "analytics" && <AnalyticsTab restaurant={restaurant} bookings={bookings} t={t} />}
         {activeTab === "settings" && (
           <SettingsTab
             restaurant={restaurant}
@@ -301,6 +324,15 @@ export default function DashboardPage() {
       </main>
 
       <GuestNeedsModal detail={needsDetail} onClose={() => setNeedsDetail(null)} t={t} />
+      <ReceiptPanel
+        booking={openReceiptBooking}
+        restaurant={restaurant}
+        menuItems={menuItems}
+        t={t}
+        lang={lang}
+        onClose={() => setOpenReceiptId(null)}
+        reload={() => loadBookings(selected)}
+      />
       <Toast toast={toast} onDismiss={() => setToast(null)} t={t} />
     </div>
   );

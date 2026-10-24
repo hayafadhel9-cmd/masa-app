@@ -113,8 +113,36 @@ create table bookings (
   -- at 8:00 PM. Please try another time.") — captured for future use even
   -- though the diner app doesn't surface it yet; cleared on undo.
   decline_reason text,
+  -- Receipts (2026-10-24 Receipts/Analytics build-out). Payment state rides
+  -- on `bookings` directly rather than a separate 1:1 `receipts` table — a
+  -- receipt is inherently one-per-booking, same reasoning as arrived/
+  -- arrived_at above, and it's already covered by the existing owner-scoped
+  -- UPDATE policy below, so no new RLS is needed for these two columns.
+  -- Line items live in their own `order_items` table (see below), which
+  -- does get its own RLS — unlike payment status, "what was ordered" has no
+  -- natural home on the bookings row itself.
+  receipt_status text,                    -- null (no tab) | 'open' | 'paid' | 'not_paid'
+  receipt_paid_at timestamp with time zone,
   created_at timestamp with time zone default now()
 );
+
+-- Line items staff add to an open tab (receipt_status = 'open'). Unlike
+-- payment status above, this genuinely is a new table — it has its own RLS
+-- further down, restaurant-staff-only; no diner-facing read path exists.
+create table order_items (
+  id uuid primary key default uuid_generate_v4(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  menu_item_id uuid references menu_items(id) on delete set null,
+  -- Snapshot name/price at the time the item was added — mirrors the
+  -- existing `bookings.card_last4` pattern of storing a point-in-time copy
+  -- rather than only a join, so a later menu price change never rewrites a
+  -- past receipt.
+  name text not null,
+  price_aed integer not null,
+  quantity integer not null default 1,
+  created_at timestamp with time zone default now()
+);
+create index idx_order_items_booking on order_items(booking_id);
 
 -- Accessibility/allergy info for one specific booking ("Anything we should
 -- know?" on the Booking screen). Deliberately its own table rather than
@@ -249,6 +277,58 @@ create policy "Diner can add needs to their own booking"
       select 1 from bookings b
       where b.id = booking_needs.booking_id
         and b.user_id = auth.uid()
+    )
+  );
+
+alter table order_items enable row level security;
+
+-- Only the restaurant that owns the booking can see or manage its order
+-- items — same join pattern as booking_needs' restaurant-side policy above.
+-- No diner-facing SELECT policy at all, unlike bookings/booking_needs.
+create policy "Restaurant can view order items for their own bookings"
+  on order_items for select
+  using (
+    exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = order_items.booking_id and r.owner_id = auth.uid()
+    )
+  );
+
+create policy "Restaurant can add order items to their own bookings"
+  on order_items for insert
+  with check (
+    exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = order_items.booking_id and r.owner_id = auth.uid()
+    )
+  );
+
+create policy "Restaurant can update order items on their own bookings"
+  on order_items for update
+  using (
+    exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = order_items.booking_id and r.owner_id = auth.uid()
+    )
+  )
+  with check (
+    exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = order_items.booking_id and r.owner_id = auth.uid()
+    )
+  );
+
+create policy "Restaurant can delete order items from their own bookings"
+  on order_items for delete
+  using (
+    exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = order_items.booking_id and r.owner_id = auth.uid()
     )
   );
 

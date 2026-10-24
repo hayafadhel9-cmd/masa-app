@@ -50,7 +50,19 @@ function NoShowModal({ booking, restaurant, onClose, onConfirm, t }) {
   );
 }
 
-export default function TonightTab({ restaurant, bookings, lang, t, reload, showToast, openNeedsModal, visitNumbers }) {
+const RECEIPT_STATUS_STYLE = {
+  open: "bg-brass/20 text-charcoal",
+  paid: "bg-green-50 text-green-700",
+  not_paid: "bg-warn/10 text-warn",
+};
+
+function receiptStatusLabel(status, t) {
+  if (status === "paid") return t("receiptPaidStatus");
+  if (status === "not_paid") return t("receiptNotPaidStatus");
+  return t("receiptOpenStatus");
+}
+
+export default function TonightTab({ restaurant, bookings, lang, t, reload, showToast, openNeedsModal, openReceipt, visitNumbers }) {
   const [noShowTarget, setNoShowTarget] = useState(null);
   const today = toLocalDateStr(new Date());
 
@@ -78,8 +90,15 @@ export default function TonightTab({ restaurant, bookings, lang, t, reload, show
   }, [todays]);
 
   async function handleArrive(booking) {
-    await supabase.from("bookings").update({ arrived: true, arrived_at: new Date().toISOString() }).eq("id", booking.id);
-    reload();
+    // Arriving a guest opens their tab (receipt_status starts 'open') and
+    // immediately surfaces the receipt editor — arriving someone is, in
+    // practice, the moment staff seat them and start ordering for them.
+    await supabase
+      .from("bookings")
+      .update({ arrived: true, arrived_at: new Date().toISOString(), receipt_status: "open" })
+      .eq("id", booking.id);
+    await reload();
+    openReceipt(booking.id);
   }
 
   async function handleNoShowConfirm(booking, total) {
@@ -143,9 +162,13 @@ export default function TonightTab({ restaurant, bookings, lang, t, reload, show
                           {t("noShowButton")}
                         </span>
                       ) : hasArrived ? (
-                        <span className="rounded-full px-4 py-2 text-xs font-semibold bg-cream text-charcoal border border-charcoal/10">
-                          {t("statArrived")}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openReceipt(b.id)}
+                          className={`rounded-full px-4 py-2 text-xs font-semibold ${RECEIPT_STATUS_STYLE[b.receipt_status || "open"]}`}
+                        >
+                          {receiptStatusLabel(b.receipt_status, t)}
+                        </button>
                       ) : (
                         <div className="flex gap-2">
                           <button
