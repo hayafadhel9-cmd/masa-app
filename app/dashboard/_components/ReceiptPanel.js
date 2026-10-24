@@ -66,6 +66,12 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
     setBusy(false);
   }
 
+  async function saveNote(item, notes) {
+    if ((item.notes || "") === notes) return;
+    await supabase.from("order_items").update({ notes: notes || null }).eq("id", item.id);
+    await reload();
+  }
+
   async function setStatus(newStatus) {
     setBusy(true);
     await supabase
@@ -104,40 +110,15 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
         <div className="flex flex-col gap-2 mb-4">
           {items.length === 0 && <p className="text-xs text-taupe">{t("noMenuItems")}</p>}
           {items.map((item) => (
-            <div key={item.id} className="flex items-center gap-2 rounded-2xl p-2.5 bg-card">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-charcoal truncate">{item.name}</div>
-                <div className="text-xs text-taupe">AED {item.price_aed}</div>
-              </div>
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => changeQuantity(item, -1)}
-                  disabled={busy}
-                  className="w-7 h-7 rounded-full flex items-center justify-center bg-tan text-charcoal disabled:opacity-50"
-                >
-                  <Minus size={12} />
-                </button>
-                <span className="w-5 text-center text-sm font-semibold text-charcoal">{item.quantity}</span>
-                <button
-                  type="button"
-                  onClick={() => changeQuantity(item, 1)}
-                  disabled={busy}
-                  className="w-7 h-7 rounded-full flex items-center justify-center bg-tan text-charcoal disabled:opacity-50"
-                >
-                  <Plus size={12} />
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => removeItem(item)}
-                disabled={busy}
-                aria-label={t("delete")}
-                className="w-7 h-7 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0 disabled:opacity-50"
-              >
-                <Trash2 size={12} />
-              </button>
-            </div>
+            <OrderItemRow
+              key={item.id}
+              item={item}
+              busy={busy}
+              onChangeQuantity={changeQuantity}
+              onRemove={removeItem}
+              onSaveNote={saveNote}
+              t={t}
+            />
           ))}
         </div>
 
@@ -216,6 +197,60 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// One line item — name/price, quantity stepper, remove, and a small note
+// input (e.g. "no onions") shown to the diner on their own Tab screen.
+// Local `note` state so typing doesn't round-trip to the server on every
+// keystroke; saved once on blur.
+function OrderItemRow({ item, busy, onChangeQuantity, onRemove, onSaveNote, t }) {
+  const [note, setNote] = useState(item.notes || "");
+
+  return (
+    <div className="rounded-2xl p-2.5 bg-card">
+      <div className="flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-charcoal truncate">{item.name}</div>
+          <div className="text-xs text-taupe">AED {item.price_aed}</div>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => onChangeQuantity(item, -1)}
+            disabled={busy}
+            className="w-7 h-7 rounded-full flex items-center justify-center bg-tan text-charcoal disabled:opacity-50"
+          >
+            <Minus size={12} />
+          </button>
+          <span className="w-5 text-center text-sm font-semibold text-charcoal">{item.quantity}</span>
+          <button
+            type="button"
+            onClick={() => onChangeQuantity(item, 1)}
+            disabled={busy}
+            className="w-7 h-7 rounded-full flex items-center justify-center bg-tan text-charcoal disabled:opacity-50"
+          >
+            <Plus size={12} />
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={() => onRemove(item)}
+          disabled={busy}
+          aria-label={t("delete")}
+          className="w-7 h-7 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0 disabled:opacity-50"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onBlur={() => onSaveNote(item, note.trim())}
+        placeholder={t("itemNotePlaceholder")}
+        className="w-full mt-2 rounded-full px-3 py-1.5 text-xs outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
+      />
     </div>
   );
 }

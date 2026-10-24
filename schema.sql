@@ -147,9 +147,31 @@ create table order_items (
   name text not null,
   price_aed integer not null,
   quantity integer not null default 1,
+  notes text,  -- e.g. "no onions" — staff-entered, shown to the diner on
+               -- their Tab screen in small grey text under the item
   created_at timestamp with time zone default now()
 );
 create index idx_order_items_booking on order_items(booking_id);
+
+-- Guests added to a booking by the diner who made it (Tab feature, "Add
+-- guests" on My Bookings) — gives them read-only access to the booking and
+-- its tab without ever letting them change anything. One row per invite
+-- link generated ("Share invite link"); user_id stays null until someone
+-- opens the link and signs in/up, at which point they claim it. guest_name
+-- is a point-in-time snapshot of the joining user's own account name (same
+-- snapshot pattern as order_items.name / bookings.card_last4) so showing
+-- "Shared with Sara" never needs to read auth.users, which isn't readable
+-- via the public API anyway.
+create table booking_guests (
+  id uuid primary key default uuid_generate_v4(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  invite_token uuid not null default uuid_generate_v4() unique,
+  user_id uuid references auth.users(id),
+  guest_name text,
+  created_at timestamp with time zone default now()
+);
+create index idx_booking_guests_booking on booking_guests(booking_id);
+create index idx_booking_guests_user on booking_guests(user_id);
 
 -- Accessibility/allergy info for one specific booking ("Anything we should
 -- know?" on the Booking screen). Deliberately its own table rather than
@@ -338,6 +360,86 @@ create policy "Restaurant can delete order items from their own bookings"
       where b.id = order_items.booking_id and r.owner_id = auth.uid()
     )
   );
+
+-- Diner-facing read path for the Tab feature (2026-10-25): the booker and
+-- any joined guest can read their own booking's order items — the actual
+-- RLS boundary behind "only the booker, added guests, and that
+-- restaurant's staff can read a tab" (staff's own policy is above). A
+-- public share-link visitor (no auth.uid()) can never match either branch,
+-- so order_items stays invisible there exactly as before.
+create policy "Booking participants can view their own order items"
+  on order_items for select
+  using (
+    exists (select 1 from bookings b where b.id = order_items.booking_id and b.user_id = auth.uid())
+    or exists (
+      select 1 from booking_guests bg
+      where bg.booking_id = order_items.booking_id and bg.user_id = auth.uid()
+    )
+  );
+
+-- Live item updates on the diner's Tab screen as staff add things.
+alter publication supabase_realtime add table order_items;
+
+alter table booking_guests enable row level security;
+
+-- "Is this user already a joined guest on this booking?" pulled out into its
+-- own SECURITY DEFINER function rather than inlined as a subquery against
+-- booking_guests inside booking_guests' own SELECT policy below — Postgres
+-- re-applies a table's RLS policy to every reference to that table,
+-- including one inside the policy's own subquery, so the inline version
+-- caused infinite recursion (caught live via a rolled-back-transaction RLS
+-- test: "infinite recursion detected in policy for relation
+-- booking_guests"). A SECURITY DEFINER function's internal query bypasses
+-- RLS entirely, breaking the cycle. authenticated-only: Supabase
+-- auto-grants EXECUTE to anon on every new function by default, so that has
+-- to be revoked explicitly too, not just `from public` (same gotcha as
+-- claim_invite below).
+create or replace function is_booking_guest(p_booking_id uuid, p_user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select exists (
+    select 1 from booking_guests
+    where booking_id = p_booking_id and user_id = p_user_id
+  );
+$$;
+
+revoke all on function is_booking_guest(uuid, uuid) from public;
+revoke execute on function is_booking_guest(uuid, uuid) from anon;
+grant execute on function is_booking_guest(uuid, uuid) to authenticated;
+
+-- Visible to the booker, any already-joined co-guest on the same booking
+-- (so "Shared with Sara" can show everyone's name), and that restaurant's
+-- staff.
+create policy "Booking participants and staff can view guest rows"
+  on booking_guests for select
+  using (
+    exists (select 1 from bookings b where b.id = booking_guests.booking_id and b.user_id = auth.uid())
+    or is_booking_guest(booking_guests.booking_id, auth.uid())
+    or exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = booking_guests.booking_id and r.owner_id = auth.uid()
+    )
+  );
+
+-- Only the booker can generate a new invite link for their own booking.
+create policy "Booker can invite guests to their own booking"
+  on booking_guests for insert
+  with check (exists (select 1 from bookings b where b.id = booking_guests.booking_id and b.user_id = auth.uid()));
+
+-- No UPDATE policy: claiming an invite goes through the claim_invite()
+-- SECURITY DEFINER function at the bottom of this file instead of a direct
+-- client-side UPDATE (see the comment there for why) — so RLS denies every
+-- UPDATE on this table outright, same as reviews below has no UPDATE policy.
+
+-- Only the booker can remove a guest from their own booking.
+create policy "Booker can remove a guest from their own booking"
+  on booking_guests for delete
+  using (exists (select 1 from bookings b where b.id = booking_guests.booking_id and b.user_id = auth.uid()));
 
 alter table reviews enable row level security;
 
@@ -696,3 +798,78 @@ $$;
 -- verified live (wrong secret -> 42501; correct secret -> write succeeds).
 revoke all on function sync_restaurant_forecast(uuid, text, jsonb, text, text, text) from public;
 grant execute on function sync_restaurant_forecast(uuid, text, jsonb, text, text, text) to anon, authenticated;
+
+-- Guest-invite accept flow (Tab feature, 2026-10-25). booking_guests has no
+-- public SELECT policy at all (unlike `bookings`, whose "unguessable ID"
+-- model doesn't fit here — every row IS an invite token, so a bulk-readable
+-- table would let anyone enumerate and claim invites never shared with
+-- them). These two SECURITY DEFINER functions are the narrow, token-scoped
+-- way around that, same pattern as sync_restaurant_forecast above.
+
+-- Lets an anonymous visitor see just enough about an invite link to render
+-- the accept page before they log in/sign up.
+create or replace function get_invite_preview(p_token uuid)
+returns table(restaurant_name text, booking_date date, booking_time text, valid boolean)
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  return query
+  select r.name, b.booking_date, b.booking_time,
+    (bg.user_id is null and b.booking_date >= current_date) as valid
+  from booking_guests bg
+  join bookings b on b.id = bg.booking_id
+  join restaurants r on r.id = b.restaurant_id
+  where bg.invite_token = p_token;
+end;
+$$;
+
+revoke all on function get_invite_preview(uuid) from public;
+grant execute on function get_invite_preview(uuid) to anon, authenticated;
+
+-- The actual claim step — authenticated only (both the explicit grant below
+-- and the auth.uid() null-check inside enforce this; Supabase auto-grants
+-- EXECUTE to anon on every new function by default, so the anon grant has
+-- to be revoked explicitly too, not just `from public` — see the advisor
+-- re-check in PROJECT_STATUS.md for how this was caught). Single atomic
+-- UPDATE: the WHERE clause (unclaimed + not expired) is both the
+-- authorization check and the optimistic-concurrency guard, so two
+-- simultaneous claims on the same token can't both succeed.
+create or replace function claim_invite(p_token uuid, p_guest_name text)
+returns table(restaurant_name text, booking_date date, booking_time text)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_booking_id uuid;
+  v_user_id uuid := auth.uid();
+begin
+  if v_user_id is null then
+    raise exception 'Not authorized' using errcode = '42501';
+  end if;
+
+  update booking_guests bg
+  set user_id = v_user_id, guest_name = p_guest_name
+  from bookings b
+  where bg.invite_token = p_token
+    and bg.booking_id = b.id
+    and bg.user_id is null
+    and b.booking_date >= current_date
+  returning bg.booking_id into v_booking_id;
+
+  if v_booking_id is null then
+    raise exception 'This invite is no longer available.' using errcode = 'P0001';
+  end if;
+
+  return query
+  select r.name, b.booking_date, b.booking_time
+  from bookings b join restaurants r on r.id = b.restaurant_id
+  where b.id = v_booking_id;
+end;
+$$;
+
+revoke all on function claim_invite(uuid, text) from public;
+revoke execute on function claim_invite(uuid, text) from anon;
+grant execute on function claim_invite(uuid, text) to authenticated;

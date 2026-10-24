@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { supabase } from "../lib/supabase/client";
-import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, AlertTriangle, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, MailCheck, Eye, EyeOff, Star, Plus, Accessibility, Baby, Nut } from "lucide-react";
+import { Search, MapPin, ChevronLeft, ChevronRight, Users, ShieldCheck, CreditCard, Check, Cake, Heart, Briefcase, Share2, Compass, BookMarked, Clock, User, Star, Plus, Accessibility, Baby, Nut, Receipt, X } from "lucide-react";
 import { canFreelyCancel } from "../lib/bookingTime";
 import {
   emptyDiningNeeds,
@@ -14,14 +14,16 @@ import {
 import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot, isSlotUpcoming } from "../lib/timeSlots";
 import { isOpenNow, formatClockLabel } from "../lib/openStatus";
 import MenuSheet from "./components/MenuSheet";
+import CustomerAuthForm from "./components/CustomerAuthForm";
+import AddGuestsSheet from "./components/AddGuestsSheet";
 import { useLanguage } from "../lib/LanguageContext";
-import { PASSWORD_MIN_LENGTH, passwordRuleMessage } from "../lib/passwordRules";
-import { useCapsLockWarning } from "../lib/useCapsLockWarning";
+import { passwordRuleMessage } from "../lib/passwordRules";
 import { authErrorMessage } from "../lib/authErrorMessage";
 import { guestNameFromUser, guestPhoneFromUser } from "../lib/guestInfo";
 import { toLocalDateStr, addDays } from "../lib/date";
 import { isAreaFull, allAreasConfigured, remainingAcrossAreas, pickAvailableArea } from "../lib/areas";
 import { bestTimeValueForSlot, occupancyPctForSlot, combineBusyness, busynessLevel, BUSYNESS_DOT_COUNT } from "../lib/busyness";
+import { computeReceiptTotals } from "../lib/receipts";
 
 // Sentinel value for "let the restaurant pick any area with space" — stored
 // transiently in UI state only, never written to bookings.zone (which always
@@ -264,6 +266,93 @@ function dismissRatingPromptId(bookingId) {
 // clip rect uses plain numeric/percentage SVG coordinates, not CSS logical
 // properties, so the fill direction stays physically left-to-right
 // regardless of the page's `dir` — this is what keeps it unmirrored in RTL.
+// First name of everyone sharing a booking besides the current viewer — the
+// booker (booking.guest_name, the same point-in-time snapshot shown to
+// restaurant staff) plus any joined guest (booking_guests.guest_name,
+// snapshotted the same way when they accepted their invite). null when
+// nobody else is on the booking, so callers can skip the "Shared with…"
+// line entirely rather than rendering it empty.
+function sharedWithNames(booking, currentUserId) {
+  const names = [];
+  if (booking.user_id && booking.user_id !== currentUserId && booking.guest_name) {
+    names.push(booking.guest_name.trim().split(" ")[0]);
+  }
+  (booking.booking_guests || []).forEach((g) => {
+    if (g.user_id && g.user_id !== currentUserId && g.guest_name) {
+      names.push(g.guest_name.trim().split(" ")[0]);
+    }
+  });
+  return names.length > 0 ? names.join(", ") : null;
+}
+
+// One open-or-closed tab's full receipt — restaurant name, a status line,
+// the itemized card (items/notes, VAT, bold total), the minimum-spend
+// progress bar (hidden entirely when no minimum spend applies that night),
+// and the "Shared with…" line. Reused by the Tab screen's Current view and
+// by tapping a Past card to see its full receipt.
+function TabReceiptCard({ booking, currentUserId, statusWord, t }) {
+  const totals = computeReceiptTotals(booking, booking.restaurants);
+  const items = booking.order_items || [];
+  const shared = sharedWithNames(booking, currentUserId);
+  const minSpendReached = totals.applies && totals.topUp === 0;
+  const minSpendPct =
+    totals.applies && totals.minSpendRequired > 0
+      ? Math.min(100, (totals.subtotal / totals.minSpendRequired) * 100)
+      : 0;
+
+  return (
+    <div>
+      <div className="font-serif text-xl text-charcoal mb-1">{booking.restaurants?.name}</div>
+      <div className="text-xs text-muted mb-4">
+        {booking.zone} · {t("guestsCount", { count: booking.party_size })} · {statusWord}
+      </div>
+
+      <div className="rounded-2xl p-4 bg-card mb-3">
+        {items.length === 0 ? (
+          <p className="text-xs text-taupe py-1">{t("noItemsYet")}</p>
+        ) : (
+          <div className="flex flex-col gap-3 mb-3">
+            {items.map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-3 text-sm">
+                <div className="min-w-0">
+                  <div className="text-charcoal">
+                    {item.quantity} × {item.name}
+                  </div>
+                  {item.notes && <div className="text-xs text-taupe mt-0.5">{item.notes}</div>}
+                </div>
+                <span className="text-charcoal flex-shrink-0">AED {item.quantity * item.price_aed}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="border-t border-charcoal/[0.08] pt-3 flex flex-col gap-1.5">
+          <div className="flex justify-between text-sm text-muted">
+            <span>{t("vatLabel")}</span>
+            <span>AED {totals.vat}</span>
+          </div>
+          <div className="flex justify-between text-base font-semibold text-charcoal">
+            <span>{t("totalLabel")}</span>
+            <span>AED {totals.total}</span>
+          </div>
+        </div>
+      </div>
+
+      {totals.applies && (
+        <div className="mb-3">
+          <div className="h-1.5 rounded-full bg-tan overflow-hidden">
+            <div className="h-full rounded-full bg-brass" style={{ width: `${minSpendPct}%` }} />
+          </div>
+          <p className="text-xs text-taupe mt-1.5">
+            {minSpendReached ? t("minSpendReached") : t("minSpendLeft", { amount: totals.topUp })}
+          </p>
+        </div>
+      )}
+
+      {shared && <p className="text-xs text-taupe">{t("sharedWith", { names: shared })}</p>}
+    </div>
+  );
+}
+
 function RatingStar({ average, size = 14 }) {
   const clipId = `rating-star-${useId()}`;
   const fillPercent = Math.max(0, Math.min(100, (average / 5) * 100));
@@ -353,119 +442,6 @@ function RatingPromptModal({ booking, value, setValue, comment, setComment, subm
   );
 }
 
-function CustomerAuthForm({
-  mode,
-  setMode,
-  email,
-  setEmail,
-  password,
-  setPassword,
-  fullName,
-  setFullName,
-  phone,
-  setPhone,
-  error,
-  loading,
-  confirmationPending,
-  onSubmit,
-  t,
-}) {
-  const [showPassword, setShowPassword] = useState(false);
-  const { capsLockOn, checkCapsLock } = useCapsLockWarning();
-
-  if (confirmationPending) {
-    return (
-      <div className="rounded-2xl p-5 bg-card text-center">
-        <MailCheck size={28} className="text-burgundy mx-auto mb-3" />
-        <div className="font-serif text-lg text-charcoal mb-1">{t("confirmEmailTitle")}</div>
-        <p className="text-sm text-muted">{t("confirmEmailBody", { email })}</p>
-      </div>
-    );
-  }
-  return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-4">
-      {mode === "signup" && (
-        <>
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("fullName")}</label>
-            <input
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-              required
-              className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
-            />
-          </div>
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("mobileNumber")}</label>
-            <input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              required
-              className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
-            />
-          </div>
-        </>
-      )}
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("email")}</label>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-          className="w-full rounded-full px-4 py-3 text-sm mt-2 outline-none bg-tan text-charcoal"
-        />
-      </div>
-      <div>
-        <label className="text-[11px] font-bold uppercase tracking-widest text-taupe">{t("password")}</label>
-        <div className="relative mt-2">
-          <input
-            type={showPassword ? "text" : "password"}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={checkCapsLock}
-            onKeyUp={checkCapsLock}
-            required
-            minLength={PASSWORD_MIN_LENGTH}
-            className="w-full rounded-full px-4 py-3 pe-11 text-sm outline-none bg-tan text-charcoal"
-          />
-          <button
-            type="button"
-            onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? t("hidePassword") : t("showPassword")}
-            className="absolute inset-y-0 end-1 flex items-center px-3 text-taupe"
-          >
-            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-          </button>
-        </div>
-        {capsLockOn && (
-          <p className="text-[11px] text-warn mt-1.5 flex items-center gap-1">
-            <AlertTriangle size={11} /> {t("capsLockWarning")}
-          </p>
-        )}
-        {mode === "signup" && (
-          <p className="text-[11px] text-taupe mt-1.5">{t("passwordRuleHint", { min: PASSWORD_MIN_LENGTH })}</p>
-        )}
-      </div>
-      {error && <p className="text-xs text-warn">{error}</p>}
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-60"
-      >
-        {loading ? t("pleaseWait") : mode === "login" ? t("signIn") : t("createAccount")}
-      </button>
-      <button
-        type="button"
-        onClick={() => setMode(mode === "login" ? "signup" : "login")}
-        className="text-center text-xs text-muted underline"
-      >
-        {mode === "login" ? t("newCustomerSignUp") : t("haveAccountSignIn")}
-      </button>
-    </form>
-  );
-}
-
 // Shared by the date strip and the hour row — fades items near the left/right
 // edges of a horizontally-scrolling container. Symmetric, so it needs no
 // RTL-specific handling (see the 2026-10-04 edge-fade bullet in PROJECT_STATUS.md).
@@ -541,6 +517,14 @@ export default function DinerPage() {
   const [selectedTonightTime, setSelectedTonightTime] = useState(null);
   const [tonightAvailability, setTonightAvailability] = useState({});
   const [menuSheetOpen, setMenuSheetOpen] = useState(false);
+  // Tab feature — the diner's own open/closed receipts (bookings they made
+  // or were added to as a guest), independent from `myBookings` above
+  // (which is about reservation status, not payment/order state).
+  const [tabView, setTabView] = useState("current");
+  const [tabBookings, setTabBookings] = useState([]);
+  const [tabLoading, setTabLoading] = useState(false);
+  const [viewingPastTab, setViewingPastTab] = useState(null);
+  const [guestsSheetBooking, setGuestsSheetBooking] = useState(null);
   const [editingBooking, setEditingBooking] = useState(null);
   const [editParty, setEditParty] = useState(2);
   const [editTime, setEditTime] = useState("");
@@ -929,20 +913,88 @@ export default function DinerPage() {
     setScreen("confirmed");
   }
 
+  // The booking ids a user has joined as an added guest (Tab feature) —
+  // shared by loadMyBookings (so a guest sees the booking in My Bookings
+  // too) and loadTabBookings (so they see its tab).
+  async function fetchGuestBookingIds(userId) {
+    const { data } = await supabase.from("booking_guests").select("booking_id").eq("user_id", userId);
+    return (data || []).map((g) => g.booking_id);
+  }
+
   async function loadMyBookings() {
     if (!user) {
       setMyBookings([]);
       return;
     }
-    const { data } = await supabase
-      .from("bookings")
-      .select(
-        "*, booking_needs(*), restaurants(name, area, cancellation_notice_hours, opening_time, closing_time, max_party_size, restaurant_areas(id, name, capacity))"
-      )
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
-    setMyBookings(data || []);
+    const selectCols =
+      "*, booking_needs(*), booking_guests(id, user_id, guest_name), restaurants(name, area, cancellation_notice_hours, opening_time, closing_time, max_party_size, restaurant_areas(id, name, capacity))";
+    const guestBookingIds = await fetchGuestBookingIds(user.id);
+    const [{ data: owned }, { data: asGuest }] = await Promise.all([
+      supabase.from("bookings").select(selectCols).eq("user_id", user.id).order("created_at", { ascending: false }),
+      guestBookingIds.length > 0
+        ? supabase.from("bookings").select(selectCols).in("id", guestBookingIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const byId = new Map([...(owned || []), ...(asGuest || [])].map((b) => [b.id, b]));
+    setMyBookings([...byId.values()].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)));
   }
+
+  // Tab feature — every booking (owned or joined as a guest) that has ever
+  // had a tab opened (`receipt_status` not null), split into Current (open)
+  // and Past (paid/not paid) on the Tab screen itself.
+  async function loadTabBookings() {
+    if (!user) {
+      setTabBookings([]);
+      return;
+    }
+    setTabLoading(true);
+    const selectCols =
+      "*, restaurants(name, min_spend_aed, min_spend_nights), order_items(*), booking_guests(id, user_id, guest_name)";
+    const guestBookingIds = await fetchGuestBookingIds(user.id);
+    const [{ data: owned }, { data: asGuest }] = await Promise.all([
+      supabase.from("bookings").select(selectCols).eq("user_id", user.id).not("receipt_status", "is", null),
+      guestBookingIds.length > 0
+        ? supabase.from("bookings").select(selectCols).in("id", guestBookingIds).not("receipt_status", "is", null)
+        : Promise.resolve({ data: [] }),
+    ]);
+    const byId = new Map([...(owned || []), ...(asGuest || [])].map((b) => [b.id, b]));
+    setTabBookings([...byId.values()]);
+    setTabLoading(false);
+  }
+
+  useEffect(() => {
+    loadTabBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  useEffect(() => {
+    if (tab === "tab") loadTabBookings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  const openTabBookings = tabBookings.filter((b) => b.receipt_status === "open");
+  const closedTabBookings = tabBookings
+    .filter((b) => b.receipt_status === "paid" || b.receipt_status === "not_paid")
+    .sort((a, b) => new Date(b.receipt_paid_at || b.booking_date) - new Date(a.receipt_paid_at || a.booking_date));
+  const currentTabBooking = openTabBookings[0] || null;
+  const hasOpenTab = openTabBookings.length > 0;
+
+  // Live item updates while the diner is actually looking at their open tab.
+  useEffect(() => {
+    if (!currentTabBooking || !(tab === "tab" && tabView === "current")) return;
+    const channel = supabase
+      .channel(`order_items_booking_${currentTabBooking.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "order_items", filter: `booking_id=eq.${currentTabBooking.id}` },
+        () => loadTabBookings()
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTabBooking?.id, tab, tabView]);
 
   // Checks, once per login, for a dined booking the customer hasn't reviewed
   // and hasn't dismissed yet, and surfaces it as the rating prompt — this is
@@ -2043,6 +2095,14 @@ export default function DinerPage() {
                         {t("edit")}
                       </button>
                     )}
+                    {b.user_id === user.id && (b.status === "pending" || b.status === "confirmed") && (
+                      <button
+                        onClick={() => setGuestsSheetBooking(b)}
+                        className="flex-1 text-xs font-medium rounded-full px-3 py-2.5 bg-tan text-charcoal"
+                      >
+                        {t("addGuests")}
+                      </button>
+                    )}
                     {canFreelyCancel(b, b.restaurants?.cancellation_notice_hours ?? 2) && (
                       <button
                         onClick={() => cancelBooking(b)}
@@ -2065,6 +2125,121 @@ export default function DinerPage() {
             })}
           </div>
           )}
+        </div>
+      )}
+
+      {tab === "tab" && !user && (
+        <div className="pt-6 flex-1 flex flex-col">
+          <h2 className="font-serif text-2xl mb-2 text-charcoal">{t("tabNavLabel")}</h2>
+          <p className="text-sm text-muted mb-6">{t("tabLoginPrompt")}</p>
+          <CustomerAuthForm
+            mode={authMode}
+            setMode={setAuthMode}
+            email={authEmail}
+            setEmail={setAuthEmail}
+            password={authPassword}
+            setPassword={setAuthPassword}
+            fullName={authFullName}
+            setFullName={setAuthFullName}
+            phone={authPhone}
+            setPhone={setAuthPhone}
+            error={authError}
+            loading={authLoading}
+            confirmationPending={authConfirmationPending}
+            onSubmit={handleAuthSubmit}
+            t={t}
+          />
+        </div>
+      )}
+
+      {tab === "tab" && user && (
+        <div className="pt-6 flex-1 flex flex-col">
+          <h2 className="font-serif text-2xl mb-5 text-charcoal">{t("tabNavLabel")}</h2>
+
+          <div className="flex bg-tan rounded-full p-1 mb-5">
+            <button
+              onClick={() => {
+                setTabView("current");
+                setViewingPastTab(null);
+              }}
+              className={`flex-1 rounded-full py-2.5 text-xs font-semibold ${
+                tabView === "current" ? "bg-burgundy text-offwhite" : "text-muted"
+              }`}
+            >
+              {t("currentBookings")}
+            </button>
+            <button
+              onClick={() => {
+                setTabView("past");
+                setViewingPastTab(null);
+              }}
+              className={`flex-1 rounded-full py-2.5 text-xs font-semibold ${
+                tabView === "past" ? "bg-burgundy text-offwhite" : "text-muted"
+              }`}
+            >
+              {t("pastBookings")}
+            </button>
+          </div>
+
+          {tabView === "current" &&
+            (currentTabBooking ? (
+              <TabReceiptCard booking={currentTabBooking} currentUserId={user.id} statusWord={t("openStatus")} t={t} />
+            ) : (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-sm text-taupe text-center px-6">{t("noOpenTab")}</p>
+              </div>
+            ))}
+
+          {tabView === "past" &&
+            (viewingPastTab ? (
+              <div>
+                <button
+                  onClick={() => setViewingPastTab(null)}
+                  className="flex items-center gap-1 text-sm text-burgundy py-2 mb-2 font-medium"
+                >
+                  <ChevronLeft size={16} className="rtl:rotate-180" /> {t("back")}
+                </button>
+                <TabReceiptCard
+                  booking={viewingPastTab}
+                  currentUserId={user.id}
+                  statusWord={viewingPastTab.receipt_status === "paid" ? t("receiptPaidStatus") : t("receiptNotPaidStatus")}
+                  t={t}
+                />
+              </div>
+            ) : closedTabBookings.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-sm text-taupe text-center px-6">{t("pastBookingsEmpty")}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {closedTabBookings.map((b) => {
+                  const shared = sharedWithNames(b, user.id);
+                  const totals = computeReceiptTotals(b, b.restaurants);
+                  const paid = b.receipt_status === "paid";
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => setViewingPastTab(b)}
+                      className="w-full text-left rounded-[20px] p-4 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.05)] flex items-start justify-between gap-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="font-serif text-base text-charcoal truncate">{b.restaurants?.name}</div>
+                        <div className="text-xs text-muted mt-1">
+                          {b.booking_date}
+                          {shared ? ` · ${t("withGuest", { name: shared })}` : ""}
+                        </div>
+                      </div>
+                      <div className="text-end flex-shrink-0">
+                        <div className="text-sm font-semibold text-charcoal">AED {totals.total}</div>
+                        <div className={`text-xs mt-1 ${paid ? "text-green-700" : "text-taupe"}`}>
+                          {paid ? t("receiptPaidStatus") : t("receiptNotPaidStatus")}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
         </div>
       )}
 
@@ -2316,6 +2491,20 @@ export default function DinerPage() {
             {t("myBookings")}
           </button>
           <button
+            onClick={() => setTab("tab")}
+            className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
+              tab === "tab" ? "text-burgundy" : "text-taupe"
+            }`}
+          >
+            <span className="relative">
+              <Receipt size={20} />
+              {hasOpenTab && (
+                <span className="absolute -top-0.5 -end-0.5 w-2 h-2 rounded-full bg-burgundy" />
+              )}
+            </span>
+            {t("tabNavLabel")}
+          </button>
+          <button
             onClick={() => setTab("account")}
             className={`flex-1 flex flex-col items-center gap-1 text-[11px] font-semibold ${
               tab === "account" ? "text-burgundy" : "text-taupe"
@@ -2328,6 +2517,7 @@ export default function DinerPage() {
       </div>
 
       <MenuSheet open={menuSheetOpen} items={visibleMenuItems} t={t} onClose={() => setMenuSheetOpen(false)} />
+      <AddGuestsSheet booking={guestsSheetBooking} onClose={() => setGuestsSheetBooking(null)} t={t} />
 
       {ratingPromptBooking && (
         <RatingPromptModal

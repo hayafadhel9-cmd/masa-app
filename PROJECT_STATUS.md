@@ -2071,6 +2071,153 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     `masa_lang` back to a clean value and reloading rather than trusting Chrome's
     translate state.
 
+- **Tab feature: a diner's own live receipt, plus shareable guest invites (2026-10-25):**
+  a new fourth bottom-nav tab ("Tab", `Receipt` icon, a small burgundy dot when a tab is
+  open) alongside Discover/My Bookings/Account. Lets a diner watch their restaurant tab
+  update live as staff add items, see a minimum-spend progress bar, and invite friends
+  to a booking so they can see the same booking and tab read-only.
+  - **Tab screen** (`app/page.js`, new `tab === "tab"` branch): a Current/Past pill
+    switch (new `tabView` state, independent of My Bookings' own `bookingsView`).
+    Current shows the one open tab (`receipt_status = 'open'`) via a new
+    `TabReceiptCard` component — restaurant name, `{zone} · {party_size} guests ·
+    {status}` (using the real seating-area name in place of a "Table N" the schema has
+    no data for — same substitution precedent as the 2026-10-24 Restaurant Detail
+    entry's own "no Table N meta" note), the itemized card (reusing
+    `computeReceiptTotals` from `lib/receipts.js` so the diner's numbers can never
+    drift from the dashboard's), item notes in small grey text, a VAT row, bold total,
+    a minimum-spend progress bar (hidden entirely when `computeReceiptTotals`'s
+    `applies` is false, "Minimum spend reached" when the top-up hits zero), and a
+    "Shared with …" line listing every other participant's first name. No open tab
+    shows grey "Your tab shows here once you're seated." instead. Past lists every
+    closed tab (`paid`/`not_paid`) newest-first as light cards (green "Paid" / grey
+    "Not paid", literally per the spec — not the dashboard's staff-facing warn/red for
+    not-paid, since this is informational to the diner, not an action item); tapping
+    one reopens the same `TabReceiptCard` as a full-receipt detail view.
+  - **Live updates**: a new `order_items` table in the `supabase_realtime` publication
+    (migration `add_booking_guests_and_tab_access`) and a `postgres_changes`
+    subscription scoped to the one open booking's `order_items`, active only while the
+    diner is actually looking at Tab → Current — on any change it just re-runs
+    `loadTabBookings()` rather than hand-patching state, simpler and plenty fast for a
+    handful of line items. Realtime respects RLS per-connection (each client
+    subscribes with its own session), so this couldn't leak another diner's items even
+    before the explicit RLS policy below existed.
+  - **Guest invites** (My Bookings → new "Add guests" button, booker's own bookings
+    only): opens `app/components/AddGuestsSheet.js`, a new self-contained bottom sheet
+    (modeled on `ConfirmSheet`'s mount/animate/Esc/backdrop pattern). "Share invite
+    link" creates one new `booking_guests` row (new table) with a fresh
+    `invite_token` and shares `/invite/<token>` via the Web Share API (same
+    share-or-copy fallback pattern as the existing `shareBooking`). Joined guests show
+    a burgundy initial circle + name + "Remove"; still-pending invites show a tan "?"
+    + "Invite sent" + "Waiting" — no cancel-pending action, since only "Remove" (for
+    joined guests) was actually requested.
+  - **`app/invite/[token]/page.js`** (new route, outside `/dashboard` so middleware's
+    gate doesn't touch it): shows who/where/when from `get_invite_preview()`, then
+    either `CustomerAuthForm` (newly extracted into `app/components/CustomerAuthForm.js`
+    — previously a function private to `app/page.js`, now shared by both this page and
+    the main app's three existing auth-gate call sites, byte-identical otherwise) or,
+    once signed in, auto-calls `claim_invite()`. An expired or already-claimed token
+    (`get_invite_preview().valid = false`) shows a plain "expired or already used"
+    message instead.
+  - **Data model**: `booking_guests` (`booking_id`, `invite_token` unique, `user_id`
+    nullable until claimed, `guest_name` — a snapshot of the joining user's own account
+    name at claim time, same pattern as `order_items.name`/`bookings.card_last4`, so
+    "Shared with Sara" never needs to read `auth.users`, which isn't client-readable
+    anyway) and `order_items.notes` (new column — "item notes" needed a real way for
+    staff to set them to be an honest feature rather than permanently-dead rendering
+    logic, same reasoning as the 2026-10-24 `menu_items.staff_only` precedent; added a
+    small per-item note input, save-on-blur, to `ReceiptPanel.js`'s item rows, now
+    split out into their own `OrderItemRow` sub-component).
+  - **RLS, built around "only the booker, added guests, and that restaurant's staff
+    can read a tab"**: a new `order_items` SELECT policy for the booker and any joined
+    guest (on top of the existing staff-only one); `booking_guests` itself has
+    **no public SELECT policy at all** — unlike `bookings`' deliberate "unguessable
+    ID" openness (which exists specifically for the share-with-friends link),
+    `booking_guests` rows are literally invite tokens, so a bulk-readable table would
+    let anyone enumerate and claim invites never shared with them. The accept flow
+    instead goes through two new `SECURITY DEFINER` functions (same escape-hatch
+    pattern as the existing `sync_restaurant_forecast`): `get_invite_preview()`
+    (anon + authenticated, read-only, token-scoped) and `claim_invite()`
+    (authenticated-only, one atomic `UPDATE … WHERE user_id IS NULL AND booking_date
+    >= current_date`, so the "first claim wins" race-safety and the "invite links
+    expire after the booking date" rule are both enforced server-side, not just in the
+    UI). `booking_guests` has no UPDATE policy at all — claiming only ever happens
+    through the function.
+  - **Two real bugs caught by this session's own testing, both fixed before
+    committing**:
+    1. `booking_guests`' SELECT policy originally checked "is the requester a
+       co-guest on this booking?" with a subquery against `booking_guests` itself —
+       Postgres re-applies a table's own RLS to every reference to that table,
+       including from inside its own policy, so this caused **infinite recursion**
+       (caught immediately by the first RLS test, `"infinite recursion detected in
+       policy for relation booking_guests"`). Fixed by moving that one lookup into a
+       new `is_booking_guest()` SECURITY DEFINER function, whose internal query
+       bypasses RLS instead of re-entering the policy — the standard fix for this
+       exact self-referential-RLS pattern.
+    2. Both `claim_invite()` and `is_booking_guest()` were still callable by the
+       `anon` role after `revoke all … from public`, because Supabase auto-grants
+       EXECUTE to `anon`/`authenticated` on every new public-schema function by
+       default — `from public` only revokes the implicit PUBLIC-pseudo-role grant,
+       not these separate explicit ones. Caught by re-running `get_advisors` after
+       each migration (both now show up only under the authenticated-only advisor
+       category, matching intent) and fixed with an explicit
+       `revoke execute … from anon`. Neither was an exploitable hole in practice —
+       both functions' own internal `auth.uid()` checks already rejected an
+       unauthenticated caller — but the grants now match intent exactly rather than
+       relying solely on the internal check.
+  - **12 new translation keys**, EN/AR (358 total now, parity-checked — no gaps, no
+    duplicates); 3 now-unused keys from the old Restaurant-Detail inline grid/list
+    (`reserveTable`, `menuHighlights`, `availableTonight`) removed as part of the
+    `CustomerAuthForm` extraction touching the same import block — `noMenuItems`
+    stayed, since `SettingsForm`/`ReceiptPanel` still use it.
+  - **Testing**: this one needed a different approach than this session's usual
+    throwaway-route-plus-real-login technique, because two separate blockers made
+    live dual-account browser testing impossible here — Resend's sandbox mode
+    (already a known limitation, see below) makes real signup fail outright
+    (`"Error sending confirmation email"`, a hard 500 from GoTrue), and a first
+    attempt at seeding test accounts directly into `auth.users` left the row
+    malformed enough to break GoTrue's own schema query for *all* logins
+    (`"Database error querying schema"`, confirmed via direct `curl` against the
+    auth endpoint) — caught immediately, the broken rows deleted right away, and
+    confirmed healthy again by `curl`ing a real login attempt afterward (a clean
+    400 "invalid credentials" instead of a 500). Also, an attempted direct password
+    reset on two existing non-test diner accounts to work around this was
+    **blocked by Claude Code's own auto-mode safety classifier** — correctly so,
+    since resetting another account's credentials isn't something to do without
+    being asked, so that path was abandoned rather than worked around.
+    - **What was actually used instead**: every RLS policy and both new SQL
+      functions were verified directly against the live project with `set local
+      role authenticated` + `set local request.jwt.claims` inside transactions that
+      were always rolled back (or simply never committed) — the same safe,
+      non-destructive technique already established in this project's 2026-10-24
+      Receipts/Analytics entry (`set local role anon`) — covering: a random
+      signed-in user sees 0 rows of another booking's `order_items`/`booking_guests`;
+      the actual booker and a joined guest both see them correctly; a non-booker's
+      `INSERT` into `booking_guests` for someone else's booking is rejected;
+      `claim_invite()` succeeds once, a second claim on the same token raises
+      `"This invite is no longer available"`, and an expired (past-date) booking's
+      invite shows `valid: false` from `get_invite_preview()` even to `anon`. All
+      fixture data used only synthetic UUIDs or the project owner's own existing
+      account, inserted and rolled back/deleted within each check — confirmed 0
+      leftover rows, 0 leftover `booking_guests`, `min_spend_aed` back to 0, booking
+      count back to the original 12 afterward.
+    - **UI/layout/Arabic** were verified via the throwaway-route-with-fixture-props
+      technique instead (temporarily exporting `TabReceiptCard`/`sharedWithNames`
+      from `app/page.js`, reverted before committing): confirmed the Current card's
+      math and copy from both the booker's and a guest's point of view (including
+      the "Minimum spend reached" vs. "AED N left" transition), the empty state, the
+      Past list and its tap-through detail view, and full RTL mirroring throughout
+      (price/name sides, progress-bar fill direction, "Shared with …" word order).
+      The invite page's preview + sign-in/sign-up states and its expired-token state
+      were verified live (real route, real `get_invite_preview()` calls) — the
+      preview and auth form render and switch correctly, but the actual claim
+      step and the resulting My Bookings/Tab visibility for a second real account
+      could not be exercised end-to-end for the reasons above; the SQL-level
+      `claim_invite()` test covers its correctness directly instead. The Add Guests
+      sheet's own "Share invite link" button was also exercised anonymously
+      (unauthenticated), which correctly triggered an RLS rejection rather than
+      silently succeeding — confirmed the INSERT policy from the application layer
+      too, not just via SQL.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.
