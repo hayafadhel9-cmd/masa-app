@@ -204,6 +204,37 @@ create table booking_guests (
 create index idx_booking_guests_booking on booking_guests(booking_id);
 create index idx_booking_guests_user on booking_guests(user_id);
 
+-- How each guest says they'll pay for their share of a tab ("How will you
+-- pay?" on the diner's Tab screen) — informational only, no real payment
+-- processing yet. One row per (booking, person); a person can update their
+-- own later ("Change").
+--
+-- `method` is deliberately plain text with NO check constraint, unlike
+-- restaurant_fees.type below — the request specifically asks for this to be
+-- extensible to "Apple Pay / Pay in app" via Stripe later without a schema
+-- migration, so a new value just needs application code, not a DDL change.
+--
+-- Amounts are never stored — split_type/split_people/split_item_ids capture
+-- the *choice*, and lib/payments.js computes the actual AED share live from
+-- the booking's current order_items/fees/VAT (same "never store a total"
+-- philosophy lib/receipts.js's own header already documents), so a later
+-- item change recalculates every existing choice automatically.
+create table booking_payment_choices (
+  id uuid primary key default uuid_generate_v4(),
+  booking_id uuid not null references bookings(id) on delete cascade,
+  user_id uuid not null references auth.users(id),
+  method text not null,  -- 'card' | 'cash' today, open-ended for later methods
+  split_type text not null check (split_type in ('full', 'even', 'items')),
+  split_people integer,       -- used when split_type = 'even'
+  split_item_ids uuid[],      -- used when split_type = 'items' (order_items.id values)
+  tip_percent integer,        -- one of the restaurant's own tip_percentages, or null
+  tip_custom_amount integer,  -- a flat AED tip when "Other" was used instead, or null
+  created_at timestamp with time zone default now(),
+  updated_at timestamp with time zone default now(),
+  unique (booking_id, user_id)
+);
+create index idx_booking_payment_choices_booking on booking_payment_choices(booking_id);
+
 -- Accessibility/allergy info for one specific booking ("Anything we should
 -- know?" on the Booking screen). Deliberately its own table rather than
 -- columns on `bookings`: `bookings` stays publicly SELECTable on purpose (the
@@ -490,6 +521,46 @@ create policy "Booker can invite guests to their own booking"
 create policy "Booker can remove a guest from their own booking"
   on booking_guests for delete
   using (exists (select 1 from bookings b where b.id = booking_guests.booking_id and b.user_id = auth.uid()));
+
+alter table booking_payment_choices enable row level security;
+
+-- Visible to the booker, any joined guest, and that restaurant's staff —
+-- same three-way shape as booking_guests' own SELECT policy above, reusing
+-- the same is_booking_guest() SECURITY DEFINER helper to avoid the exact
+-- self-referential-RLS recursion that function was built to fix.
+create policy "Booking participants and staff can view payment choices"
+  on booking_payment_choices for select
+  using (
+    exists (select 1 from bookings b where b.id = booking_payment_choices.booking_id and b.user_id = auth.uid())
+    or is_booking_guest(booking_payment_choices.booking_id, auth.uid())
+    or exists (
+      select 1 from bookings b
+      join restaurants r on r.id = b.restaurant_id
+      where b.id = booking_payment_choices.booking_id and r.owner_id = auth.uid()
+    )
+  );
+
+-- A participant (booker or joined guest) can only ever set their OWN
+-- choice — "each guest writes only their own choice."
+create policy "A participant can set their own payment choice"
+  on booking_payment_choices for insert
+  with check (
+    user_id = auth.uid()
+    and (
+      exists (select 1 from bookings b where b.id = booking_payment_choices.booking_id and b.user_id = auth.uid())
+      or is_booking_guest(booking_payment_choices.booking_id, auth.uid())
+    )
+  );
+
+-- "Change" — a participant can only ever update their own row, never
+-- anyone else's.
+create policy "A participant can update their own payment choice"
+  on booking_payment_choices for update
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
+-- Live updates on the Tab screen as other guests submit their own choice.
+alter publication supabase_realtime add table booking_payment_choices;
 
 alter table reviews enable row level security;
 

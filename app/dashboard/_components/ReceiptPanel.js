@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Minus, X, Trash2 } from "lucide-react";
+import { Plus, Minus, X, Trash2, CreditCard, Banknote } from "lucide-react";
 import { supabase } from "../../../lib/supabase/client";
 import { computeReceiptTotals } from "../../../lib/receipts";
+import { computePaymentAmounts, participantName, paymentChoiceDetail } from "../../../lib/payments";
 
 const STATUS_STYLE = {
   open: "bg-brass/20 text-charcoal",
@@ -29,6 +30,8 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
   const totals = computeReceiptTotals(booking, restaurant);
   const items = booking.order_items || [];
   const status = booking.receipt_status || "open";
+  const paymentChoices = booking.booking_payment_choices || [];
+  const totalTips = paymentChoices.reduce((sum, c) => sum + computePaymentAmounts(c, totals, booking).tipAed, 0);
 
   async function addItem(menuItem) {
     const existing = items.find((i) => i.menu_item_id === menuItem.id);
@@ -168,6 +171,36 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
             <span>{t("totalLabel")}</span>
             <span>AED {totals.total}</span>
           </div>
+        </div>
+
+        <div className="rounded-2xl p-4 bg-card mb-4">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-taupe mb-3">{t("guestsWillPayLabel")}</div>
+          {paymentChoices.length === 0 ? (
+            <p className="text-xs text-taupe">{t("noPaymentChoiceYet")}</p>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2 mb-2">
+                {paymentChoices.map((c) => {
+                  const amounts = computePaymentAmounts(c, totals, booking);
+                  const Icon = c.method === "card" ? CreditCard : Banknote;
+                  return (
+                    <div key={c.id} className="flex items-center gap-2.5 text-sm">
+                      <Icon size={14} className="text-taupe flex-shrink-0" />
+                      <span className="flex-1 min-w-0 truncate text-charcoal">{participantName(booking, c.user_id)}</span>
+                      <span className="text-xs text-taupe flex-shrink-0">{paymentChoiceDetail(c, t)}</span>
+                      <span className="font-semibold text-charcoal flex-shrink-0">AED {amounts.youPayAed}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              {totalTips > 0 && (
+                <div className="flex justify-between pt-2 mt-1 border-t border-charcoal/[0.08] text-sm">
+                  <span className="text-muted">{t("totalTipsLabel")}</span>
+                  <span className="font-semibold text-charcoal">AED {totalTips}</span>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <div className="flex gap-2">

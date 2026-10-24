@@ -2319,6 +2319,94 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     authenticated save — only the RLS layer (which correctly rejects an
     unauthenticated attempt) and the component rendering/math were verified live.
 
+- **"How will you pay?" — diner payment-choice sheet, restaurant-visible (2026-10-26):**
+  no real payments — this only tells the restaurant how each guest plans to pay (card or
+  cash, at the table). The Tab screen's receipt card now shows the restaurant's fees as
+  their own lines (reusing the 2026-10-25 Fees-and-tips receipt order unchanged) and a
+  burgundy "How will you pay?" button opens a bottom sheet (`PayTabSheet.js`, following
+  this session's established sheet pattern — mount/animate via `requestAnimationFrame`,
+  Esc + backdrop to close, `motion-reduce:duration-0`).
+  - **The sheet**: METHOD chips (Card/Cash), SPLIT chips (Pay full / Split evenly /
+    My items — the last showing a checkbox list of the tab's own items, fees and VAT
+    following in proportion to the chosen items' share of the subtotal), a TIP section
+    gated entirely on the restaurant's own tip settings from the Fees-and-tips feature
+    (hidden outright if `accept_tips` is off, only the restaurant's own
+    `tip_percentages` shown as chips, plus an "Other" custom-AED chip only if
+    `allow_custom_tip` is on) — tip is always computed on the guest's own share, never
+    the full total. A live summary card ("Your share" / "Tip" / bold "You pay AED …")
+    updates as every chip is tapped, before saving. Saving upserts onto
+    `booking_payment_choices` and shows a grey "Pay at the table. In-app payment coming
+    soon." note under the save button — no Stripe integration yet.
+  - **"Never store a total" extended to payments**: only the *choice* is persisted
+    (`method`/`split_type`/`split_people`/`split_item_ids`/`tip_percent`/
+    `tip_custom_amount`) — the actual AED amounts are always recomputed live from
+    current `order_items`/fees/VAT by a new shared `lib/payments.js`
+    (`computeShareAed`/`computeTipAed`/`computePaymentAmounts`), the same philosophy
+    `lib/receipts.js` already documents for itself. This means an item added or removed
+    after a guest already chose how to pay silently recalculates their amount on next
+    render — nothing to invalidate or migrate.
+  - **After saving**, the Tab screen shows a "How you're paying" list — each guest's
+    first name, Card/Cash, their amount, and a grey detail line (e.g. "Half + 10% tip",
+    built by `paymentChoiceDetail()` in `lib/payments.js`) — then "Covered AED {sum}"
+    with a green "Full bill covered" once every guest's share reaches the total, or a
+    grey "AED {x} still to cover" until then. The booker/guest who already chose sees a
+    "Change" link instead of the button; this list and button only render on the
+    **Current** (open) tab view, never Past/closed — both via the
+    `receipt_status === "open"` guard and by the Past-view call site simply not passing
+    the `onOpenPay` prop at all, a deliberate second layer of the same guard. Each
+    participant can only ever write their own row (see RLS below), so nobody can set or
+    overwrite another guest's choice from the UI either.
+  - **Restaurant side** (`ReceiptPanel.js`, shared by both the Tonight and Receipts tabs
+    since it's the one shared receipt editor — this single edit covers the request's
+    "Tonight and Receipts" ask for both surfaces): a new "Guests will pay" card between
+    the totals card and the status-action buttons, each guest as a card/cash icon + name
+    + detail + amount, a "Total tips" line beneath when any tip was chosen, or a grey
+    "No payment choice yet" when nobody has. Tips also now show as their own stat tile
+    in `ReceiptsTab.js` (next to Billed/Still to collect) and `AnalyticsTab.js` (its 5th
+    stat tile, summed across the selected period via the same `computePaymentAmounts`).
+  - **Extensibility for "without redesign" requirement**: `booking_payment_choices.method`
+    is plain `text` with **no check constraint** — unlike `split_type`, which IS
+    constrained to `'full'|'even'|'items'` — specifically so a future method (Apple Pay,
+    Stripe in-app) can be added entirely in application code, no migration, once real
+    payment processing exists.
+  - **Data model**: new `booking_payment_choices` table (`booking_id`, `user_id`,
+    `method`, `split_type`, `split_people`, `split_item_ids uuid[]`, `tip_percent`,
+    `tip_custom_amount`, `unique (booking_id, user_id)` so a save is a simple
+    `upsert(…, { onConflict: "booking_id,user_id" })`), added to `supabase_realtime`
+    alongside the Tab feature's existing `order_items` subscription on the same channel
+    rather than a second one. RLS: insert/update both require `user_id = auth.uid()`;
+    select is scoped to the booker (`bookings.user_id`), any guest via the existing
+    `is_booking_guest()` SECURITY DEFINER helper built for the 2026-10-25 Tab feature's
+    own self-referential-RLS bug (reused here specifically to avoid retriggering that
+    same bug class rather than writing a new inline self-join), or that booking's
+    restaurant owner. `get_advisors` showed no new findings.
+  - **29 new translation keys**, EN/AR (406 total now, parity-checked — no gaps, no
+    duplicates).
+  - **Tested** the same way as the 2026-10-25 Tab feature and the Fees-and-tips entry
+    above: no real diner/restaurant login is available in this environment, so RLS was
+    verified via `set local role authenticated` + `set local request.jwt.claims` inside
+    transactions never committed, and the UI/math/Arabic-RTL pass used a throwaway QA
+    route (`app/qa-pay-preview/page.js`, temporarily re-exporting `TabReceiptCard`,
+    both reverted before committing) rendering three real Tab-card scenarios plus
+    `PayTabSheet`/`ReceiptPanel` against one real committed booking with real
+    `order_items` and one real `booking_payment_choices` row, deleted after (booking
+    count back to 12, no fee/tip-settings overrides needed since this restaurant's
+    `accept_tips`/`tip_percentages`/`allow_custom_tip` were already sitting at the
+    table's own defaults). Hand-checked the arithmetic before trusting what rendered:
+    subtotal AED 245, VAT AED 12, total AED 257; an even 2-way split share of AED 129 +
+    10% tip (AED 13) = AED 142 "You pay", matching both the diner Tab card and the
+    restaurant's "Guests will pay" card; switching to "My items" with only the AED 180
+    item checked gave a proportional share of AED 189 (180/245 × 257, rounded); a custom
+    AED 25 tip summed correctly to AED 214. Confirmed in both English and Arabic/RTL —
+    chip layout, summary card, and the Tab/ReceiptPanel payment lines all mirror
+    correctly. One unrelated, pre-existing issue was noticed and ruled out during this
+    pass: `LanguageContext.js`'s `dir`/`lang`/`localStorage` can transiently fall out of
+    sync with each other across a dev-server hot-reload (confirmed via
+    `document.documentElement.dir`/`.lang` disagreeing after an HMR refresh, self-healing
+    on a full page reload) — not introduced by this feature and not reproduced outside
+    dev-mode hot-reloading, so left as-is rather than chased further; worth a look if it
+    ever shows up outside HMR.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.

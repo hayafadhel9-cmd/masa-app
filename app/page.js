@@ -16,6 +16,7 @@ import { isOpenNow, formatClockLabel } from "../lib/openStatus";
 import MenuSheet from "./components/MenuSheet";
 import CustomerAuthForm from "./components/CustomerAuthForm";
 import AddGuestsSheet from "./components/AddGuestsSheet";
+import PayTabSheet from "./components/PayTabSheet";
 import { useLanguage } from "../lib/LanguageContext";
 import { passwordRuleMessage } from "../lib/passwordRules";
 import { authErrorMessage } from "../lib/authErrorMessage";
@@ -24,6 +25,7 @@ import { toLocalDateStr, addDays } from "../lib/date";
 import { isAreaFull, allAreasConfigured, remainingAcrossAreas, pickAvailableArea } from "../lib/areas";
 import { bestTimeValueForSlot, occupancyPctForSlot, combineBusyness, busynessLevel, BUSYNESS_DOT_COUNT } from "../lib/busyness";
 import { computeReceiptTotals } from "../lib/receipts";
+import { computePaymentAmounts, participantName, paymentChoiceDetail } from "../lib/payments";
 
 // Sentinel value for "let the restaurant pick any area with space" — stored
 // transiently in UI state only, never written to bookings.zone (which always
@@ -288,9 +290,11 @@ function sharedWithNames(booking, currentUserId) {
 // One open-or-closed tab's full receipt — restaurant name, a status line,
 // the itemized card (items/notes, VAT, bold total), the minimum-spend
 // progress bar (hidden entirely when no minimum spend applies that night),
-// and the "Shared with…" line. Reused by the Tab screen's Current view and
-// by tapping a Past card to see its full receipt.
-function TabReceiptCard({ booking, currentUserId, statusWord, lang, t }) {
+// the "Shared with…" line, and — only while the tab is still open — the
+// "How will you pay?" flow. Reused by the Tab screen's Current view and by
+// tapping a Past card to see its full receipt (where the payment flow no
+// longer applies, since the tab's already settled).
+function TabReceiptCard({ booking, currentUserId, statusWord, lang, t, onOpenPay }) {
   const totals = computeReceiptTotals(booking, booking.restaurants);
   const items = booking.order_items || [];
   const shared = sharedWithNames(booking, currentUserId);
@@ -299,6 +303,11 @@ function TabReceiptCard({ booking, currentUserId, statusWord, lang, t }) {
     totals.applies && totals.minSpendRequired > 0
       ? Math.min(100, (totals.subtotal / totals.minSpendRequired) * 100)
       : 0;
+
+  const choices = booking.booking_payment_choices || [];
+  const myChoice = choices.find((c) => c.user_id === currentUserId);
+  const covered = choices.reduce((sum, c) => sum + computePaymentAmounts(c, totals, booking).shareAed, 0);
+  const remaining = Math.max(0, totals.total - covered);
 
   return (
     <div>
@@ -354,7 +363,57 @@ function TabReceiptCard({ booking, currentUserId, statusWord, lang, t }) {
         </div>
       )}
 
-      {shared && <p className="text-xs text-taupe">{t("sharedWith", { names: shared })}</p>}
+      {shared && <p className="text-xs text-taupe mb-5">{t("sharedWith", { names: shared })}</p>}
+
+      {booking.receipt_status === "open" && onOpenPay && (
+        <div>
+          {choices.length > 0 && (
+            <>
+              <div className="text-[11px] font-bold uppercase tracking-widest text-taupe mb-3">
+                {t("howYourePaying")}
+              </div>
+              <div className="flex flex-col gap-2 mb-3">
+                {choices.map((c) => {
+                  const amounts = computePaymentAmounts(c, totals, booking);
+                  return (
+                    <div key={c.id} className="flex items-center justify-between rounded-2xl px-4 py-3 bg-card">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-charcoal truncate">
+                          {participantName(booking, c.user_id)} · {c.method === "card" ? t("payCard") : t("payCash")}
+                        </div>
+                        <div className="text-xs text-taupe">{paymentChoiceDetail(c, t)}</div>
+                      </div>
+                      <span className="text-sm font-semibold text-charcoal flex-shrink-0">AED {amounts.youPayAed}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-xs text-taupe">{t("coveredAmount", { amount: covered })}</span>
+                {remaining <= 0 ? (
+                  <span className="text-xs font-semibold text-green-700">{t("fullBillCovered")}</span>
+                ) : (
+                  <span className="text-xs text-taupe">{t("stillToCoverAmount", { amount: remaining })}</span>
+                )}
+              </div>
+            </>
+          )}
+
+          {myChoice ? (
+            <button type="button" onClick={() => onOpenPay(booking)} className="text-sm font-medium text-burgundy underline">
+              {t("change")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onOpenPay(booking)}
+              className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite shadow-[0_6px_16px_rgba(74,23,41,0.3)]"
+            >
+              {t("howWillYouPay")}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -531,6 +590,11 @@ export default function DinerPage() {
   const [tabLoading, setTabLoading] = useState(false);
   const [viewingPastTab, setViewingPastTab] = useState(null);
   const [guestsSheetBooking, setGuestsSheetBooking] = useState(null);
+  // "How will you pay?" — the booking currently being paid for (or null).
+  // A fresh choice vs. editing an existing one ("Change") is told apart
+  // purely by whether the current user already has a row in that
+  // booking's booking_payment_choices, not by separate state here.
+  const [payingBooking, setPayingBooking] = useState(null);
   const [editingBooking, setEditingBooking] = useState(null);
   const [editParty, setEditParty] = useState(2);
   const [editTime, setEditTime] = useState("");
@@ -955,7 +1019,7 @@ export default function DinerPage() {
     }
     setTabLoading(true);
     const selectCols =
-      "*, restaurants(name, min_spend_aed, min_spend_nights), order_items(*), booking_guests(id, user_id, guest_name)";
+      "*, restaurants(name, min_spend_aed, min_spend_nights, accept_tips, tip_percentages, allow_custom_tip), order_items(*), booking_guests(id, user_id, guest_name), booking_payment_choices(*)";
     const guestBookingIds = await fetchGuestBookingIds(user.id);
     const [{ data: owned }, { data: asGuest }] = await Promise.all([
       supabase.from("bookings").select(selectCols).eq("user_id", user.id).not("receipt_status", "is", null),
@@ -985,7 +1049,9 @@ export default function DinerPage() {
   const currentTabBooking = openTabBookings[0] || null;
   const hasOpenTab = openTabBookings.length > 0;
 
-  // Live item updates while the diner is actually looking at their open tab.
+  // Live item and payment-choice updates while the diner is actually
+  // looking at their open tab — so "Covered AED …" and a co-guest's new
+  // choice show up without a manual refresh.
   useEffect(() => {
     if (!currentTabBooking || !(tab === "tab" && tabView === "current")) return;
     const channel = supabase
@@ -993,6 +1059,11 @@ export default function DinerPage() {
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "order_items", filter: `booking_id=eq.${currentTabBooking.id}` },
+        () => loadTabBookings()
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "booking_payment_choices", filter: `booking_id=eq.${currentTabBooking.id}` },
         () => loadTabBookings()
       )
       .subscribe();
@@ -2189,7 +2260,14 @@ export default function DinerPage() {
 
           {tabView === "current" &&
             (currentTabBooking ? (
-              <TabReceiptCard booking={currentTabBooking} currentUserId={user.id} statusWord={t("openStatus")} lang={lang} t={t} />
+              <TabReceiptCard
+                booking={currentTabBooking}
+                currentUserId={user.id}
+                statusWord={t("openStatus")}
+                lang={lang}
+                t={t}
+                onOpenPay={setPayingBooking}
+              />
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-taupe text-center px-6">{t("noOpenTab")}</p>
@@ -2525,6 +2603,13 @@ export default function DinerPage() {
 
       <MenuSheet open={menuSheetOpen} items={visibleMenuItems} t={t} onClose={() => setMenuSheetOpen(false)} />
       <AddGuestsSheet booking={guestsSheetBooking} onClose={() => setGuestsSheetBooking(null)} t={t} />
+      <PayTabSheet
+        booking={payingBooking}
+        userId={user?.id}
+        onClose={() => setPayingBooking(null)}
+        onSaved={loadTabBookings}
+        t={t}
+      />
 
       {ratingPromptBooking && (
         <RatingPromptModal

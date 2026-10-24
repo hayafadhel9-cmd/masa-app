@@ -71,7 +71,7 @@ export default function DashboardPage() {
     if (!restaurantId) return;
     const { data } = await supabase
       .from("bookings")
-      .select("*, booking_needs(*), order_items(*)")
+      .select("*, booking_needs(*), order_items(*), booking_guests(id, user_id, guest_name), booking_payment_choices(*)")
       .eq("restaurant_id", restaurantId);
     setBookings(data || []);
   }, []);

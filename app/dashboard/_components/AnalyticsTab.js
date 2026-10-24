@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { toLocalDateStr, addDays } from "../../../lib/date";
 import { computeReceiptTotals, minSpendApplies } from "../../../lib/receipts";
+import { computePaymentAmounts } from "../../../lib/payments";
 import { generateTimeSlots, groupSlotsByHour, hourLabelOfSlot } from "../../../lib/timeSlots";
 import { StatTile } from "./RequestsTab";
 
@@ -39,6 +40,16 @@ export default function AnalyticsTab({ restaurant, bookings, lang, t }) {
 
   const minSpendApplicable = served.filter((b) => minSpendApplies(restaurant, b.booking_date));
   const minSpendReached = minSpendApplicable.filter((b) => computeReceiptTotals(b, restaurant).topUp === 0).length;
+
+  const totalTips = served.reduce(
+    (sum, b, i) =>
+      sum +
+      (b.booking_payment_choices || []).reduce(
+        (s, c) => s + computePaymentAmounts(c, totalsPerBooking[i], b).tipAed,
+        0
+      ),
+    0
+  );
 
   // Traffic (not just served tabs) within the window, honored bookings only
   // (confirmed/dined — not pending/declined/cancelled/no-show), bucketed
@@ -106,6 +117,7 @@ export default function AnalyticsTab({ restaurant, bookings, lang, t }) {
           label={t("statMinSpendReached")}
           value={minSpendApplicable.length > 0 ? `${minSpendReached} / ${minSpendApplicable.length}` : "—"}
         />
+        <StatTile label={t("totalTipsLabel")} value={`AED ${totalTips}`} />
       </div>
 
       <div className="rounded-2xl p-4 bg-card mb-6">

@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { toLocalDateStr, addDays } from "../../../lib/date";
 import { relativeDateLabel } from "../../../lib/relativeDate";
 import { computeReceiptTotals } from "../../../lib/receipts";
+import { computePaymentAmounts } from "../../../lib/payments";
 
 const STATUS_STYLE = {
   open: "bg-brass/20 text-charcoal",
@@ -28,6 +29,15 @@ export default function ReceiptsTab({ restaurant, bookings, lang, t, openReceipt
   const stillToCollect = receipts
     .filter((r) => r.booking.receipt_status !== "paid")
     .reduce((sum, r) => sum + r.totals.total, 0);
+  const tips = receipts.reduce(
+    (sum, r) =>
+      sum +
+      (r.booking.booking_payment_choices || []).reduce(
+        (s, c) => s + computePaymentAmounts(c, r.totals, r.booking).tipAed,
+        0
+      ),
+    0
+  );
 
   return (
     <>
@@ -61,6 +71,10 @@ export default function ReceiptsTab({ restaurant, bookings, lang, t, openReceipt
           <div className="rounded-2xl px-4 py-2.5 bg-card text-end">
             <div className="text-[10px] font-bold uppercase tracking-widest text-taupe">{t("stillToCollectLabel")}</div>
             <div className="font-serif text-lg text-charcoal">AED {stillToCollect}</div>
+          </div>
+          <div className="rounded-2xl px-4 py-2.5 bg-card text-end">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-taupe">{t("totalTipsLabel")}</div>
+            <div className="font-serif text-lg text-charcoal">AED {tips}</div>
           </div>
         </div>
       </div>
