@@ -168,6 +168,11 @@ export default function DashboardPage() {
   }
 
   const activeLabelKey = NAV_ITEMS.find((n) => n.key === activeTab)?.labelKey || "navRequests";
+  // Settings is the one surface styled as a centered ~760px column (see
+  // SettingsForm.js) — its header row is centered the same way here so the
+  // title/date/switch line up with the cards below, instead of spanning the
+  // same full width every other tab uses.
+  const isSettingsTab = activeTab === "settings";
   const todayLabel = new Intl.DateTimeFormat(lang === "ar" ? "ar" : "en-US", {
     weekday: "long",
     day: "numeric",
@@ -243,34 +248,36 @@ export default function DashboardPage() {
         )}
       </aside>
 
-      <main className="flex-1 min-w-0 px-8 py-8 overflow-y-auto">
-        <div className="flex items-start justify-between gap-4 mb-7">
-          <div>
-            <h1 className="font-serif text-3xl text-charcoal">{t(activeLabelKey)}</h1>
-            <p className="text-sm text-muted mt-1">{todayLabel}</p>
-            {!restaurant.accepting_requests && <p className="text-xs text-warn mt-1">{t("pausedNotice")}</p>}
-          </div>
-          <button
-            type="button"
-            onClick={toggleAccepting}
-            disabled={togglingAvailability}
-            className="flex items-center gap-2.5 flex-shrink-0 disabled:opacity-60"
-          >
-            <span className="text-sm font-medium text-charcoal">
-              {restaurant.accepting_requests ? t("takingRequests") : t("requestsPaused")}
-            </span>
-            <span
-              className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${
-                restaurant.accepting_requests ? "bg-green-700" : "bg-tan"
-              }`}
+      <main className={`flex-1 min-w-0 py-8 overflow-y-auto ${isSettingsTab ? "px-4" : "px-8"}`}>
+        <div className={isSettingsTab ? "w-full max-w-[760px] mx-auto" : undefined}>
+          <div className="flex items-start justify-between gap-4 mb-7">
+            <div>
+              <h1 className="font-serif text-3xl text-charcoal">{t(activeLabelKey)}</h1>
+              <p className="text-sm text-muted mt-1">{todayLabel}</p>
+              {!restaurant.accepting_requests && <p className="text-xs text-warn mt-1">{t("pausedNotice")}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={toggleAccepting}
+              disabled={togglingAvailability}
+              className="flex items-center gap-2.5 flex-shrink-0 disabled:opacity-60"
             >
+              <span className="text-sm font-medium text-charcoal">
+                {restaurant.accepting_requests ? t("takingRequests") : t("requestsPaused")}
+              </span>
               <span
-                className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
-                  restaurant.accepting_requests ? "translate-x-5 rtl:-translate-x-5" : "translate-x-0"
+                className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors ${
+                  restaurant.accepting_requests ? "bg-green-700" : "bg-tan"
                 }`}
-              />
-            </span>
-          </button>
+              >
+                <span
+                  className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+                    restaurant.accepting_requests ? "translate-x-5 rtl:-translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </span>
+            </button>
+          </div>
         </div>
 
         {activeTab === "requests" && (
@@ -319,6 +326,7 @@ export default function DashboardPage() {
             areas={areas}
             onAreasChanged={() => loadAreas(selected)}
             onRestaurantSaved={(saved) => setRestaurants((prev) => prev.map((r) => (r.id === saved.id ? saved : r)))}
+            onSignOut={handleSignOut}
           />
         )}
       </main>

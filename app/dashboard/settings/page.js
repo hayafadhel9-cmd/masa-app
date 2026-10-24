@@ -58,6 +58,11 @@ function DashboardSettingsInner() {
     load();
   }, [router]);
 
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    router.push("/dashboard/login");
+  }
+
   if (checkingAuth) {
     return <div className="min-h-screen bg-cream flex items-center justify-center text-sm text-taupe">{t("loading")}</div>;
   }
@@ -71,8 +76,8 @@ function DashboardSettingsInner() {
   }
 
   return (
-    <div className="max-w-xl mx-auto min-h-screen bg-cream px-6 pb-16">
-      <div className="flex items-center justify-between pt-4 mb-2">
+    <div className="min-h-screen bg-cream px-4 pb-16">
+      <div className="w-full max-w-[760px] mx-auto flex items-center justify-between pt-4 mb-2">
         <button onClick={() => router.push("/dashboard")} className="flex items-center gap-1 text-sm text-burgundy font-medium py-2">
           <ChevronLeft size={16} className="rtl:rotate-180" /> {isOnboarding ? t("skipForNow") : t("backToDashboard")}
         </button>
@@ -88,6 +93,7 @@ function DashboardSettingsInner() {
         restaurant={restaurant}
         isOnboarding={isOnboarding}
         pendingRestaurantName={pendingRestaurantName}
+        onSignOut={handleSignOut}
         onSaved={(saved) => {
           if (isOnboarding) {
             router.push("/dashboard");

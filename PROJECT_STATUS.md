@@ -1896,6 +1896,78 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
     layout), and the busiest-times chart (bars and hour labels both in reading-order
     for RTL).
 
+- **Settings page restyled — layout/styling only, no field/logic/save changes
+  (2026-10-24):** the Settings tab and the standalone `/dashboard/settings` route (both
+  still powered by the one shared `SettingsForm`, see the 2026-10-24 Settings-tab entry
+  above) got a visual pass per a detailed request: centered column, card-grouped
+  sections, stepper controls, and a sticky save bar. Every field, its `onChange`, and
+  `handleSave`'s payload/destination are byte-identical to before.
+  - **Centered column, Settings only**: `SettingsForm`'s own root is now
+    `max-w-[760px] mx-auto`, and the dashboard shell (`app/dashboard/page.js`) centers
+    its shared title/date/"Taking requests" header the same way, but only when
+    `activeTab === "settings"` — every other tab keeps its existing full-width `px-8`
+    layout. Below 760px both just become a normal full-width column with `px-4`, no
+    extra breakpoint needed since `max-w` simply stops constraining.
+  - **Seven card-grouped sections**, each a small uppercase grey label + a trailing
+    rule (the same treatment Requests already uses for "OLDEST FIRST") above an
+    off-white (`bg-card`) rounded-corner card: Restaurant (name; cuisine + area side by
+    side on `sm:`, stacked below; address with its existing grey hint; price tier as
+    the existing 4-pill switch), Booking rules, No shows and cancellations, Minimum
+    spend, Seating areas, Menu, and a new **This tablet** section (the existing
+    language toggle, plus a new Sign out button — see below).
+  - **New `StepperRow` component** replaces plain number inputs for every count/fee/
+    duration setting (minimum notice, maximum window, largest group online, no-show
+    fee, free-cancellation window, minimum spend): a left label + grey hint, a right
+    round minus button, the value with a small grey unit suffix, a round plus button —
+    all three controls 44px. The underlying state/`onChange` wiring is unchanged, only
+    the control markup around it.
+  - **Sticky save bar** replaces the old inline "Save changes" button: `position:
+    sticky; bottom: 0`, showing grey "All changes saved." with a disabled button when
+    nothing's changed, or a gold-outlined "You have unsaved changes." with an enabled
+    burgundy Save button otherwise. Dirty-tracking is a new, purely presentational
+    `buildSnapshot()`/`savedSnapshot` JSON comparison over just the top-form fields
+    (restaurant info through minimum spend) — seating areas and menu still save
+    immediately on their own, same as before, and aren't part of this snapshot.
+    `handleSave` itself only gained an optional-chained `e?.preventDefault?.()` so the
+    bar's button can call it directly outside the `<form>` submit path; the save logic
+    after that line is untouched.
+  - **New Sign out button** in This tablet, shown only when the host passes an
+    `onSignOut` prop — both the Settings tab (`SettingsTab.js`, wired to the shell's
+    existing `handleSignOut`) and the standalone route (`app/dashboard/settings/
+    page.js`, which didn't have a sign-out path before and now mirrors the shell's
+    exact `supabase.auth.signOut()` + redirect-to-login pattern) pass one.
+  - **Brand-color judgment call**: the request's literal hex values (`#F9F6F0`,
+    `#E0D6C5`, `#461A28`) are each a few hex digits off Held's existing Tailwind tokens
+    (`card: #FBF6EF`, `tan: #E4D6C6`, `burgundy: #4A1729`) — used the existing
+    `bg-card`/`bg-tan`/`bg-burgundy` tokens instead of introducing new one-off hex
+    values, consistent with the standing instruction from earlier in this project to
+    use Held's real brand tokens over near-identical literal values from a design spec.
+  - **11 new translation keys**, EN/AR (319 total now, parity-checked — no gaps, no
+    duplicates): section labels, stepper units, and the two save-bar status strings.
+  - **44px tap targets** added throughout wherever a control didn't already have one
+    (steppers, pills, text inputs, area/menu row buttons) — styling-only, no handler
+    changes.
+  - **Tested live against the real project**, both contexts (Settings-tab host and
+    standalone-route host), using the same throwaway-route-plus-real-data technique as
+    prior 2026-10-24 entries (`app/qa-settings-preview/page.js`, rendering the real
+    `SettingsForm` against the real restaurant row with its real public-read seating
+    areas and menu items, deleted before committing, `next build` re-verified clean
+    both right after the component rewrite and again after removing the route). Checked
+    at 1440px and 1024px (full centered column, side-by-side cuisine/area, sticky bar
+    pinned correctly), and at the narrowest width Chrome's own window chrome allows
+    resizing to (500px — Chrome enforces a ~500px floor on window width, so true 390px
+    couldn't be produced directly; 500px already exercises the same sub-760px/
+    sub-640px(`sm:`) layout rules a 390px viewport would hit, just with a little more
+    headroom). Verified the sticky bar overlaps content while scrolling through the
+    middle of a long form (expected — the same behavior as a checkout bar) but settles
+    into normal flow with no permanent overlap once the true bottom of the form is
+    reached. Also verified in Arabic: full RTL mirroring of every section, the stepper
+    rows (plus/minus swap sides correctly), the save bar (button and text swap sides),
+    and the new Sign out button — this surfaced that Chrome's own page-translate
+    feature was silently re-flipping the tab back to English/LTR mid-session (a known
+    gotcha from earlier in this project), fixed each time by a fresh reload rather than
+    relying on Chrome's translate state.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase/client";
 import { toLocalDateStr } from "../../../lib/date";
-import { Save, Plus, Trash2, Camera, ImageOff } from "lucide-react";
+import { Plus, Minus, Trash2, Camera, ImageOff, LogOut } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 import ConfirmSheet from "../../components/ConfirmSheet";
 
@@ -38,14 +38,67 @@ function dayLabel(dayIndex, lang) {
 }
 const DAY_INDICES = [0, 1, 2, 3, 4, 5, 6];
 
+const SECTION_LABEL = "text-[10px] font-bold uppercase tracking-widest text-taupe flex-shrink-0";
 const FIELD_LABEL = "text-[10px] font-bold uppercase tracking-widest text-taupe";
-const FIELD_INPUT = "w-full rounded-full px-4 py-2.5 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe";
+const FIELD_INPUT =
+  "w-full rounded-full px-4 py-2.5 text-sm mt-2 outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy";
+
+// A section's small-caps grey label + trailing rule, then an off-white card
+// around its fields — the same "label + rule" treatment already used
+// elsewhere in the dashboard (e.g. Requests' "OLDEST FIRST").
+function SettingsSection({ label, children }) {
+  return (
+    <div className="mb-8">
+      <div className="flex items-center gap-3 mb-3">
+        <span className={SECTION_LABEL}>{label}</span>
+        <div className="h-px bg-charcoal/[0.08] flex-1" />
+      </div>
+      <div className="rounded-[18px] p-5 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.06)]">{children}</div>
+    </div>
+  );
+}
+
+// A single numeric setting as a left label/hint + right stepper, instead of
+// a plain number input — tap targets are 44px (w-11/h-11) per the request.
+function StepperRow({ label, hint, value, onChange, unit, min = 0, divider = true }) {
+  const n = Number(value) || 0;
+  return (
+    <div className={`flex items-center justify-between gap-4 py-4 ${divider ? "border-b border-charcoal/[0.08]" : ""}`}>
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-charcoal">{label}</div>
+        {hint && <div className="text-xs text-muted mt-0.5">{hint}</div>}
+      </div>
+      <div className="flex items-center gap-2.5 flex-shrink-0">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(min, n - 1))}
+          aria-label={label}
+          className="w-11 h-11 rounded-full flex items-center justify-center bg-tan text-charcoal flex-shrink-0"
+        >
+          <Minus size={14} />
+        </button>
+        <div className="min-w-[56px] text-center">
+          <span className="text-base font-semibold text-charcoal">{n}</span>
+          {unit && <span className="text-xs text-taupe ms-1">{unit}</span>}
+        </div>
+        <button
+          type="button"
+          onClick={() => onChange(n + 1)}
+          aria-label={label}
+          className="w-11 h-11 rounded-full flex items-center justify-center bg-tan text-charcoal flex-shrink-0"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // The full restaurant-settings form — restaurant info, booking rules,
 // no-show/cancellation, minimum spend, seating areas, menu, and the
 // dashboard's own language setting. Used two ways: standalone on
 // /dashboard/settings (onboarding + direct access, `areas`/`onAreasChanged`
-// left undefined so it manages its own area list) and embedded as the new
+// left undefined so it manages its own area list) and embedded as the
 // Settings tab inside the dashboard shell (`areas`/`onAreasChanged` passed
 // in so area edits here immediately show up in Requests' zone-capacity
 // lines too, instead of going stale until the next tab switch).
@@ -55,6 +108,7 @@ export default function SettingsForm({
   showHeading = true,
   pendingRestaurantName = "",
   onSaved,
+  onSignOut,
   areas: areasProp,
   onAreasChanged,
 }) {
@@ -98,6 +152,51 @@ export default function SettingsForm({
   // confirmLabel, onConfirm } | null. Replaces window.confirm() everywhere
   // on this form; see ConfirmSheet for the component itself.
   const [confirmState, setConfirmState] = useState(null);
+
+  // Drives the sticky save bar's "All changes saved." / "You have unsaved
+  // changes." state — a presentational snapshot of the top-form fields only
+  // (seating areas and menu save immediately on their own, unaffected by
+  // this). Taken at mount from the loaded restaurant, and re-taken after
+  // every successful save.
+  const buildSnapshot = useCallback(
+    () =>
+      JSON.stringify({
+        name,
+        cuisine,
+        area,
+        address,
+        priceTier,
+        noShowFee: String(noShowFee),
+        noticeHours: String(noticeHours),
+        openingTime,
+        closingTime,
+        partySizes: [...partySizes].sort((a, b) => a - b),
+        minAdvanceDays: String(minAdvanceDays),
+        maxAdvanceDays: String(maxAdvanceDays),
+        maxPartySize: String(maxPartySize),
+        minSpendAed: String(minSpendAed),
+        minSpendNights: [...minSpendNights].sort((a, b) => a - b),
+      }),
+    [
+      name,
+      cuisine,
+      area,
+      address,
+      priceTier,
+      noShowFee,
+      noticeHours,
+      openingTime,
+      closingTime,
+      partySizes,
+      minAdvanceDays,
+      maxAdvanceDays,
+      maxPartySize,
+      minSpendAed,
+      minSpendNights,
+    ]
+  );
+  const [savedSnapshot, setSavedSnapshot] = useState(buildSnapshot);
+  const isDirty = buildSnapshot() !== savedSnapshot;
 
   const loadAreas = useCallback(
     async (restaurantId) => {
@@ -283,7 +382,7 @@ export default function SettingsForm({
   }
 
   async function handleSave(e) {
-    e.preventDefault();
+    e?.preventDefault?.();
     setSaving(true);
     setSavedMsg("");
     setSaveError(false);
@@ -354,11 +453,12 @@ export default function SettingsForm({
       }).catch(() => {});
     }
     setSavedMsg(t("saved"));
+    setSavedSnapshot(buildSnapshot());
     onSaved?.(saved);
   }
 
   return (
-    <div className="max-w-xl">
+    <div className="w-full max-w-[760px] mx-auto">
       {showHeading && (
         <>
           <h1 className="font-serif text-2xl text-charcoal mb-1">
@@ -368,218 +468,180 @@ export default function SettingsForm({
         </>
       )}
 
-      <form onSubmit={handleSave} className="flex flex-col gap-4">
-        {/* Restaurant info */}
-        <div>
-          <label className={FIELD_LABEL}>{t("restaurantName")}</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_INPUT} required />
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("cuisine")}</label>
-          <input
-            value={cuisine}
-            onChange={(e) => setCuisine(e.target.value)}
-            placeholder={t("cuisinePlaceholder")}
-            className={FIELD_INPUT}
-          />
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("area")}</label>
-          <input
-            value={area}
-            onChange={(e) => setArea(e.target.value)}
-            placeholder={t("areaPlaceholder")}
-            className={FIELD_INPUT}
-          />
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("address")}</label>
-          <input
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder={t("addressPlaceholder")}
-            className={FIELD_INPUT}
-          />
-          <p className="text-xs text-taupe mt-1.5">{t("addressHint")}</p>
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("priceTier")}</label>
-          <div className="flex gap-2 mt-2">
-            {PRICE_TIERS.map((p) => (
-              <button
-                type="button"
-                key={p}
-                onClick={() => setPriceTier(p)}
-                className={`flex-1 rounded-full py-2 text-sm font-semibold ${
-                  priceTier === p ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
-                }`}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Booking rules */}
-        <div className="h-px bg-charcoal/[0.08] my-2" />
-        <div>
-          <label className={FIELD_LABEL}>{t("advanceBookingQuestion")}</label>
-          <div className="flex gap-2 mt-2 items-end">
-            <div className="flex-1">
-              <span className="text-[10px] text-taupe">{t("minNoticeDays")}</span>
-              <input
-                type="number"
-                min="0"
-                value={minAdvanceDays}
-                onChange={(e) => setMinAdvanceDays(e.target.value)}
-                className="w-full rounded-full px-4 py-2.5 text-sm mt-1 outline-none bg-tan text-charcoal"
-              />
+      <form onSubmit={handleSave}>
+        <SettingsSection label={t("restaurantSection")}>
+          <div className="flex flex-col gap-4">
+            <div>
+              <label className={FIELD_LABEL}>{t("restaurantName")}</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} className={FIELD_INPUT} required />
             </div>
-            <div className="flex-1">
-              <span className="text-[10px] text-taupe">{t("maxWindowDays")}</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={FIELD_LABEL}>{t("cuisine")}</label>
+                <input
+                  value={cuisine}
+                  onChange={(e) => setCuisine(e.target.value)}
+                  placeholder={t("cuisinePlaceholder")}
+                  className={FIELD_INPUT}
+                />
+              </div>
+              <div>
+                <label className={FIELD_LABEL}>{t("area")}</label>
+                <input
+                  value={area}
+                  onChange={(e) => setArea(e.target.value)}
+                  placeholder={t("areaPlaceholder")}
+                  className={FIELD_INPUT}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={FIELD_LABEL}>{t("address")}</label>
               <input
-                type="number"
-                min="0"
-                value={maxAdvanceDays}
-                onChange={(e) => setMaxAdvanceDays(e.target.value)}
-                className="w-full rounded-full px-4 py-2.5 text-sm mt-1 outline-none bg-tan text-charcoal"
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder={t("addressPlaceholder")}
+                className={FIELD_INPUT}
               />
+              <p className="text-xs text-taupe mt-1.5">{t("addressHint")}</p>
+            </div>
+            <div>
+              <label className={FIELD_LABEL}>{t("priceTier")}</label>
+              <div className="flex gap-2 mt-2">
+                {PRICE_TIERS.map((p) => (
+                  <button
+                    type="button"
+                    key={p}
+                    onClick={() => setPriceTier(p)}
+                    className={`flex-1 min-h-[44px] rounded-full text-sm font-semibold ${
+                      priceTier === p ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-          <p className="text-[11px] text-taupe mt-1.5">{t("advanceBookingHint")}</p>
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("bookingHours")}</label>
-          <div className="flex gap-2 mt-2 items-center">
-            <input
-              type="time"
-              value={openingTime}
-              onChange={(e) => setOpeningTime(e.target.value)}
-              className="flex-1 rounded-full px-4 py-2.5 text-sm outline-none bg-tan text-charcoal"
+        </SettingsSection>
+
+        <SettingsSection label={t("bookingRulesSection")}>
+          <div>
+            <StepperRow
+              label={t("minNoticeDays")}
+              value={minAdvanceDays}
+              onChange={setMinAdvanceDays}
+              unit={t("daysUnit")}
             />
-            <span className="text-xs text-taupe">{t("to")}</span>
-            <input
-              type="time"
-              value={closingTime}
-              onChange={(e) => setClosingTime(e.target.value)}
-              className="flex-1 rounded-full px-4 py-2.5 text-sm outline-none bg-tan text-charcoal"
+            <StepperRow
+              label={t("maxWindowDays")}
+              hint={t("advanceBookingHint")}
+              value={maxAdvanceDays}
+              onChange={setMaxAdvanceDays}
+              unit={t("daysUnit")}
+            />
+            <div className="py-4 border-b border-charcoal/[0.08]">
+              <label className={FIELD_LABEL}>{t("bookingHours")}</label>
+              <div className="flex gap-2 mt-2 items-center">
+                <input
+                  type="time"
+                  value={openingTime}
+                  onChange={(e) => setOpeningTime(e.target.value)}
+                  className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+                />
+                <span className="text-xs text-taupe">{t("to")}</span>
+                <input
+                  type="time"
+                  value={closingTime}
+                  onChange={(e) => setClosingTime(e.target.value)}
+                  className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+                />
+              </div>
+              <p className="text-[11px] text-taupe mt-1.5">{t("bookingHoursHint")}</p>
+            </div>
+            <StepperRow
+              label={t("maxPartySizeLabel")}
+              hint={t("maxPartySizeHint")}
+              value={maxPartySize}
+              onChange={setMaxPartySize}
+              unit={t("guestsUnit")}
+              min={1}
+            />
+            <div className="pt-4">
+              <label className={FIELD_LABEL}>{t("tableSizesOffered")}</label>
+              <div className="grid grid-cols-6 gap-2 mt-2">
+                {[2, 4, 6, 8, 10, 12].map((size) => (
+                  <button
+                    type="button"
+                    key={size}
+                    onClick={() => togglePartySize(size)}
+                    className={`min-h-[44px] rounded-full text-sm font-semibold ${
+                      partySizes.includes(size) ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {size}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection label={t("noShowsCancellationsSection")}>
+          <div>
+            <StepperRow label={t("noShowFeeSetting")} value={noShowFee} onChange={setNoShowFee} unit={t("aedUnit")} />
+            <StepperRow
+              label={t("cancellationWindowSetting")}
+              value={noticeHours}
+              onChange={setNoticeHours}
+              unit={t("hoursBeforeUnit")}
+              divider={false}
             />
           </div>
-          <p className="text-[11px] text-taupe mt-1.5">{t("bookingHoursHint")}</p>
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("maxPartySizeLabel")}</label>
-          <input
-            type="number"
-            min="1"
-            value={maxPartySize}
-            onChange={(e) => setMaxPartySize(e.target.value)}
-            className={FIELD_INPUT}
-          />
-          <p className="text-[11px] text-taupe mt-1.5">{t("maxPartySizeHint")}</p>
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("tableSizesOffered")}</label>
-          <div className="grid grid-cols-6 gap-2 mt-2">
-            {[2, 4, 6, 8, 10, 12].map((size) => (
-              <button
-                type="button"
-                key={size}
-                onClick={() => togglePartySize(size)}
-                className={`rounded-full py-2 text-sm font-semibold ${
-                  partySizes.includes(size) ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
-                }`}
-              >
-                {size}
-              </button>
-            ))}
+        </SettingsSection>
+
+        <SettingsSection label={t("minSpendSection")}>
+          <div>
+            <StepperRow label={t("minSpendSetting")} hint={t("minSpendHint")} value={minSpendAed} onChange={setMinSpendAed} unit={t("aedUnit")} />
+            <div className="pt-4">
+              <label className={FIELD_LABEL}>{t("minSpendNightsLabel")}</label>
+              <div className="grid grid-cols-7 gap-2 mt-2">
+                {DAY_INDICES.map((d) => (
+                  <button
+                    type="button"
+                    key={d}
+                    onClick={() => toggleMinSpendNight(d)}
+                    className={`min-h-[44px] rounded-full text-xs font-semibold ${
+                      minSpendNights.includes(d) ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {dayLabel(d, lang)}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-
-        {/* No-show fee + free cancellation */}
-        <div className="h-px bg-charcoal/[0.08] my-2" />
-        <div>
-          <label className={FIELD_LABEL}>{t("noShowFeeSetting")}</label>
-          <input
-            type="number"
-            min="0"
-            value={noShowFee}
-            onChange={(e) => setNoShowFee(e.target.value)}
-            className={FIELD_INPUT}
-          />
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("cancellationWindowSetting")}</label>
-          <input
-            type="number"
-            min="0"
-            value={noticeHours}
-            onChange={(e) => setNoticeHours(e.target.value)}
-            className={FIELD_INPUT}
-          />
-        </div>
-
-        {/* Minimum spend */}
-        <div className="h-px bg-charcoal/[0.08] my-2" />
-        <div>
-          <label className={FIELD_LABEL}>{t("minSpendSetting")}</label>
-          <input
-            type="number"
-            min="0"
-            value={minSpendAed}
-            onChange={(e) => setMinSpendAed(e.target.value)}
-            className={FIELD_INPUT}
-          />
-          <p className="text-[11px] text-taupe mt-1.5">{t("minSpendHint")}</p>
-        </div>
-        <div>
-          <label className={FIELD_LABEL}>{t("minSpendNightsLabel")}</label>
-          <div className="grid grid-cols-7 gap-2 mt-2">
-            {DAY_INDICES.map((d) => (
-              <button
-                type="button"
-                key={d}
-                onClick={() => toggleMinSpendNight(d)}
-                className={`rounded-full py-2 text-xs font-semibold ${
-                  minSpendNights.includes(d) ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
-                }`}
-              >
-                {dayLabel(d, lang)}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {savedMsg && <p className={`text-xs ${saveError ? "text-warn" : "text-burgundy"}`}>{savedMsg}</p>}
-
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full rounded-full py-3.5 text-sm font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-2 disabled:opacity-60 mt-1"
-        >
-          <Save size={15} /> {saving ? t("saving") : isOnboarding ? t("finishSetup") : t("saveChanges")}
-        </button>
+        </SettingsSection>
       </form>
 
       {/* Seating areas */}
       {restaurant && (
-        <div className="mt-8 pt-6 border-t border-charcoal/[0.08]">
-          <h2 className="font-serif text-xl text-charcoal mb-1">{t("seatingAvailable")}</h2>
+        <SettingsSection label={t("seatingAvailable")}>
           <p className="text-sm text-muted mb-4">{t("zoneCapacityHint")}</p>
 
-          <div className="flex flex-col gap-2 mb-4">
+          <div className="divide-y divide-charcoal/[0.08] mb-4">
             {areas.map((a) => (
               <AreaRow key={a.id} area={a} onSave={saveArea} onDelete={deleteArea} canDelete={areas.length > 1} t={t} />
             ))}
           </div>
 
-          <div className="rounded-2xl p-3 bg-card border border-dashed border-taupe/40">
+          <div className="rounded-2xl p-3 border border-dashed border-taupe/40">
             <div className="flex items-center gap-2 mb-2">
               <input
                 value={newAreaName}
                 onChange={(e) => setNewAreaName(e.target.value)}
                 placeholder={t("areaNamePlaceholder")}
-                className="flex-1 rounded-full px-4 py-2 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
               />
               <input
                 type="number"
@@ -587,38 +649,37 @@ export default function SettingsForm({
                 value={newAreaCapacity}
                 onChange={(e) => setNewAreaCapacity(e.target.value)}
                 placeholder={t("areaCapacityPlaceholder")}
-                className="w-24 rounded-full px-3 py-2 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                className="w-24 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
               />
             </div>
             <button
               type="button"
               onClick={addArea}
               disabled={addingArea || !newAreaName.trim()}
-              className="w-full rounded-full py-2.5 text-xs font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="w-full min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               <Plus size={13} /> {addingArea ? t("adding") : t("addArea")}
             </button>
           </div>
-        </div>
+        </SettingsSection>
       )}
 
       {/* Menu */}
       {restaurant && (
-        <div className="mt-8 pt-6 border-t border-charcoal/[0.08]">
-          <h2 className="font-serif text-xl text-charcoal mb-1">{t("menu")}</h2>
+        <SettingsSection label={t("menu")}>
           <p className="text-sm text-muted mb-4">{t("menuSectionHint")}</p>
 
-          <div className="flex flex-col gap-2 mb-4">
-            {menuItems.length === 0 && <p className="text-xs text-taupe">{t("noMenuItems")}</p>}
+          <div className="divide-y divide-charcoal/[0.08] mb-4">
+            {menuItems.length === 0 && <p className="text-xs text-taupe py-2">{t("noMenuItems")}</p>}
             {menuItems.map((item) => (
               <MenuItemRow key={item.id} item={item} onSave={saveMenuItem} onDelete={deleteMenuItem} t={t} />
             ))}
           </div>
 
-          <div className="rounded-2xl p-3 bg-card border border-dashed border-taupe/40">
+          <div className="rounded-2xl p-3 border border-dashed border-taupe/40">
             <div className="text-[10px] font-bold uppercase tracking-widest text-taupe mb-2">{t("addADish")}</div>
             <div className="flex items-center gap-2 mb-2">
-              <label className="w-12 h-12 rounded-xl bg-tan flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden">
+              <label className="w-11 h-11 rounded-xl bg-tan flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden">
                 {newDishPreview ? (
                   <img src={newDishPreview} alt="" className="w-full h-full object-cover" />
                 ) : (
@@ -630,7 +691,7 @@ export default function SettingsForm({
                 value={newDishName}
                 onChange={(e) => setNewDishName(e.target.value)}
                 placeholder={t("dishNamePlaceholder")}
-                className="flex-1 rounded-full px-4 py-2 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
               />
               <input
                 type="number"
@@ -638,39 +699,77 @@ export default function SettingsForm({
                 value={newDishPrice}
                 onChange={(e) => setNewDishPrice(e.target.value)}
                 placeholder={t("aedPlaceholder")}
-                className="w-20 rounded-full px-3 py-2 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+                className="w-20 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
               />
             </div>
             <button
               type="button"
               onClick={addMenuItem}
               disabled={addingDish || !newDishName.trim() || !newDishPrice}
-              className="w-full rounded-full py-2.5 text-xs font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="w-full min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
               <Plus size={13} /> {addingDish ? t("adding") : t("addDish")}
             </button>
           </div>
-        </div>
+        </SettingsSection>
       )}
 
-      {/* Dashboard language */}
-      <div className="mt-8 pt-6 border-t border-charcoal/[0.08]">
-        <h2 className="font-serif text-xl text-charcoal mb-1">{t("dashboardLanguageSetting")}</h2>
-        <p className="text-sm text-muted mb-4">{t("dashboardLanguageHint")}</p>
-        <div className="inline-flex bg-tan rounded-full p-1">
+      {/* This tablet */}
+      <SettingsSection label={t("thisTabletSection")}>
+        <div>
+          <div className="pb-4 border-b border-charcoal/[0.08]">
+            <label className={FIELD_LABEL}>{t("dashboardLanguageSetting")}</label>
+            <p className="text-xs text-muted mt-1 mb-2">{t("dashboardLanguageHint")}</p>
+            <div className="inline-flex bg-tan rounded-full p-1">
+              <button
+                type="button"
+                onClick={() => setLang("en")}
+                className={`min-h-[44px] rounded-full px-5 text-sm font-semibold ${lang === "en" ? "bg-burgundy text-offwhite" : "text-charcoal"}`}
+              >
+                English
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang("ar")}
+                className={`min-h-[44px] rounded-full px-5 text-sm font-semibold ${lang === "ar" ? "bg-burgundy text-offwhite" : "text-charcoal"}`}
+              >
+                العربية
+              </button>
+            </div>
+          </div>
+          {onSignOut && (
+            <div className="pt-4">
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="flex items-center gap-2 min-h-[44px] rounded-full px-5 text-sm font-semibold bg-tan text-charcoal"
+              >
+                <LogOut size={14} /> {t("signOut")}
+              </button>
+            </div>
+          )}
+        </div>
+      </SettingsSection>
+
+      {/* Sticky save bar for the top form (restaurant info through minimum
+          spend) — seating areas and menu save immediately on their own and
+          aren't tracked by it. */}
+      <div className="sticky bottom-0 mt-2 -mx-4 sm:mx-0">
+        <div
+          className={`flex items-center justify-between gap-4 rounded-2xl px-5 py-4 mb-4 bg-cream shadow-[0_-4px_14px_rgba(43,31,33,0.08)] border-t-2 ${
+            saveError ? "border-warn" : isDirty ? "border-brass" : "border-charcoal/[0.08]"
+          }`}
+        >
+          <span className={`text-sm ${saveError ? "text-warn" : "text-muted"}`}>
+            {saveError ? savedMsg : isDirty ? t("unsavedChanges") : t("allChangesSaved")}
+          </span>
           <button
             type="button"
-            onClick={() => setLang("en")}
-            className={`rounded-full px-5 py-2 text-sm font-semibold ${lang === "en" ? "bg-burgundy text-offwhite" : "text-charcoal"}`}
+            onClick={handleSave}
+            disabled={saving || !isDirty}
+            className="flex-shrink-0 min-h-[44px] rounded-full px-6 text-sm font-semibold bg-burgundy text-offwhite disabled:opacity-40"
           >
-            English
-          </button>
-          <button
-            type="button"
-            onClick={() => setLang("ar")}
-            className={`rounded-full px-5 py-2 text-sm font-semibold ${lang === "ar" ? "bg-burgundy text-offwhite" : "text-charcoal"}`}
-          >
-            العربية
+            {saving ? t("saving") : isOnboarding ? t("finishSetup") : t("saveChanges")}
           </button>
         </div>
       </div>
@@ -709,7 +808,7 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
 
   if (!editing) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl p-3 bg-card">
+      <div className="flex items-center gap-3 py-3">
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-charcoal truncate">{area.name}</div>
           <div className="text-xs text-taupe">
@@ -721,7 +820,7 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="text-xs font-semibold rounded-full px-3 py-1.5 bg-tan text-charcoal flex-shrink-0"
+          className="text-xs font-semibold min-h-[44px] rounded-full px-3 bg-tan text-charcoal flex-shrink-0"
         >
           {t("edit")}
         </button>
@@ -730,7 +829,7 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
           onClick={() => onDelete(area)}
           aria-label={t("removeArea")}
           disabled={!canDelete}
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0 disabled:opacity-40"
+          className="w-11 h-11 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0 disabled:opacity-40"
         >
           <Trash2 size={14} />
         </button>
@@ -739,12 +838,12 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
   }
 
   return (
-    <div className="rounded-2xl p-3 bg-card ring-2 ring-burgundy">
+    <div className="rounded-2xl p-3 my-1 ring-2 ring-burgundy">
       <div className="flex items-center gap-2 mb-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 rounded-full px-4 py-2 text-sm outline-none bg-tan text-charcoal"
+          className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
         />
         <input
           type="number"
@@ -752,7 +851,7 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
           value={capacity}
           onChange={(e) => setCapacity(e.target.value)}
           placeholder={t("areaCapacityPlaceholder")}
-          className="w-24 rounded-full px-3 py-2 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe"
+          className="w-24 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
         />
       </div>
       <div className="flex gap-2">
@@ -760,11 +859,11 @@ function AreaRow({ area, onSave, onDelete, canDelete, t }) {
           type="button"
           onClick={handleSave}
           disabled={saving || !name.trim()}
-          className="flex-1 rounded-full py-2 text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+          className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
         >
           {saving ? t("saving") : t("save")}
         </button>
-        <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs font-semibold bg-tan text-charcoal">
+        <button type="button" onClick={cancelEdit} className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-tan text-charcoal">
           {t("cancel")}
         </button>
       </div>
@@ -811,11 +910,11 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
 
   if (!editing) {
     return (
-      <div className="flex items-center gap-3 rounded-2xl p-3 bg-card">
+      <div className="flex items-center gap-3 py-3">
         {item.photo_url ? (
-          <img src={item.photo_url} alt={item.name} className="w-12 h-12 rounded-xl object-cover flex-shrink-0" />
+          <img src={item.photo_url} alt={item.name} className="w-11 h-11 rounded-xl object-cover flex-shrink-0" />
         ) : (
-          <div className="w-12 h-12 rounded-xl bg-tan flex items-center justify-center flex-shrink-0">
+          <div className="w-11 h-11 rounded-xl bg-tan flex items-center justify-center flex-shrink-0">
             <ImageOff size={16} className="text-taupe" />
           </div>
         )}
@@ -826,7 +925,7 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
         <button
           type="button"
           onClick={() => setEditing(true)}
-          className="text-xs font-semibold rounded-full px-3 py-1.5 bg-tan text-charcoal flex-shrink-0"
+          className="text-xs font-semibold min-h-[44px] rounded-full px-3 bg-tan text-charcoal flex-shrink-0"
         >
           {t("edit")}
         </button>
@@ -834,7 +933,7 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
           type="button"
           onClick={() => onDelete(item)}
           aria-label={t("deleteDish")}
-          className="w-8 h-8 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0"
+          className="w-11 h-11 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0"
         >
           <Trash2 size={14} />
         </button>
@@ -843,23 +942,23 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
   }
 
   return (
-    <div className="rounded-2xl p-3 bg-card ring-2 ring-burgundy">
+    <div className="rounded-2xl p-3 my-1 ring-2 ring-burgundy">
       <div className="flex items-center gap-2 mb-2">
-        <label className="w-12 h-12 rounded-xl bg-tan flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden">
+        <label className="w-11 h-11 rounded-xl bg-tan flex items-center justify-center flex-shrink-0 cursor-pointer overflow-hidden">
           {preview ? <img src={preview} alt="" className="w-full h-full object-cover" /> : <Camera size={16} className="text-taupe" />}
           <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
         </label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="flex-1 rounded-full px-4 py-2 text-sm outline-none bg-tan text-charcoal"
+          className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
         />
         <input
           type="number"
           min="0"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
-          className="w-20 rounded-full px-3 py-2 text-sm outline-none bg-tan text-charcoal"
+          className="w-20 min-h-[44px] rounded-full px-3 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
         />
       </div>
       <div className="flex gap-2">
@@ -867,11 +966,11 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
           type="button"
           onClick={handleSave}
           disabled={saving || !name.trim()}
-          className="flex-1 rounded-full py-2 text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+          className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
         >
           {saving ? t("saving") : t("save")}
         </button>
-        <button type="button" onClick={cancelEdit} className="flex-1 rounded-full py-2 text-xs font-semibold bg-tan text-charcoal">
+        <button type="button" onClick={cancelEdit} className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-tan text-charcoal">
           {t("cancel")}
         </button>
       </div>
