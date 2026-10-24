@@ -43,6 +43,7 @@ export default function DashboardPage() {
   const [bookings, setBookings] = useState([]);
   const [areas, setAreas] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
+  const [fees, setFees] = useState([]);
   const [activeTab, setActiveTab] = useState("requests");
   const [toast, setToast] = useState(null);
   const [needsDetail, setNeedsDetail] = useState(null);
@@ -94,6 +95,21 @@ export default function DashboardPage() {
     setMenuItems(data || []);
   }, []);
 
+  // Loaded here too (not just inside SettingsForm's own copy) so
+  // TonightTab's handleArrive can freeze the currently-active fees onto a
+  // booking the moment its tab opens — same duplication pattern already in
+  // place for menuItems above (SettingsForm's menu CRUD vs. ReceiptPanel's
+  // "Add Item" buttons here).
+  const loadFees = useCallback(async (restaurantId) => {
+    if (!restaurantId) return;
+    const { data } = await supabase
+      .from("restaurant_fees")
+      .select("*")
+      .eq("restaurant_id", restaurantId)
+      .order("sort_order");
+    setFees(data || []);
+  }, []);
+
   useEffect(() => {
     if (checkingAuth) return;
     async function load() {
@@ -112,7 +128,8 @@ export default function DashboardPage() {
     loadBookings(selected);
     loadAreas(selected);
     loadMenuItems(selected);
-  }, [selected, loadBookings, loadAreas, loadMenuItems]);
+    loadFees(selected);
+  }, [selected, loadBookings, loadAreas, loadMenuItems, loadFees]);
 
   useEffect(() => {
     if (!selected) return;
@@ -297,6 +314,7 @@ export default function DashboardPage() {
           <TonightTab
             restaurant={restaurant}
             bookings={bookings}
+            fees={fees}
             lang={lang}
             t={t}
             reload={() => loadBookings(selected)}
@@ -319,12 +337,14 @@ export default function DashboardPage() {
         {activeTab === "receipts" && (
           <ReceiptsTab restaurant={restaurant} bookings={bookings} lang={lang} t={t} openReceipt={setOpenReceiptId} />
         )}
-        {activeTab === "analytics" && <AnalyticsTab restaurant={restaurant} bookings={bookings} t={t} />}
+        {activeTab === "analytics" && <AnalyticsTab restaurant={restaurant} bookings={bookings} lang={lang} t={t} />}
         {activeTab === "settings" && (
           <SettingsTab
             restaurant={restaurant}
             areas={areas}
             onAreasChanged={() => loadAreas(selected)}
+            fees={fees}
+            onFeesChanged={() => loadFees(selected)}
             onRestaurantSaved={(saved) => setRestaurants((prev) => prev.map((r) => (r.id === saved.id ? saved : r)))}
             onSignOut={handleSignOut}
           />

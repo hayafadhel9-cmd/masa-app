@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../../lib/supabase/client";
 import { toLocalDateStr } from "../../../lib/date";
-import { Plus, Minus, Trash2, Camera, ImageOff, LogOut } from "lucide-react";
+import { Plus, Minus, Trash2, Camera, ImageOff, LogOut, ChevronUp, ChevronDown } from "lucide-react";
 import { useLanguage } from "../../../lib/LanguageContext";
 import ConfirmSheet from "../../components/ConfirmSheet";
 
@@ -55,6 +55,29 @@ function SettingsSection({ label, children }) {
       </div>
       <div className="rounded-[18px] p-5 bg-card shadow-[0_4px_14px_rgba(43,31,33,0.06)]">{children}</div>
     </div>
+  );
+}
+
+// A plain on/off switch — same look as the dashboard shell's own "Taking
+// requests" toggle, reused here for each fee's active flag and the two tip
+// settings so all three on/off controls in this app look identical.
+function Switch({ checked, onChange, label }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      aria-label={label}
+      aria-pressed={checked}
+      className={`w-11 h-6 rounded-full flex items-center px-0.5 transition-colors flex-shrink-0 ${
+        checked ? "bg-green-700" : "bg-tan"
+      }`}
+    >
+      <span
+        className={`w-5 h-5 rounded-full bg-white shadow transition-transform ${
+          checked ? "translate-x-5 rtl:-translate-x-5" : "translate-x-0"
+        }`}
+      />
+    </button>
   );
 }
 
@@ -111,6 +134,8 @@ export default function SettingsForm({
   onSignOut,
   areas: areasProp,
   onAreasChanged,
+  fees: feesProp,
+  onFeesChanged,
 }) {
   const { lang, setLang, t } = useLanguage();
   const [saving, setSaving] = useState(false);
@@ -134,6 +159,11 @@ export default function SettingsForm({
   const [maxPartySize, setMaxPartySize] = useState(restaurant?.max_party_size ?? 14);
   const [minSpendAed, setMinSpendAed] = useState(restaurant?.min_spend_aed ?? 0);
   const [minSpendNights, setMinSpendNights] = useState(restaurant?.min_spend_nights || []);
+  const [acceptTips, setAcceptTips] = useState(restaurant?.accept_tips ?? true);
+  const [tipPercentages, setTipPercentages] = useState(
+    restaurant?.tip_percentages?.length === 3 ? restaurant.tip_percentages : [10, 15, 20]
+  );
+  const [allowCustomTip, setAllowCustomTip] = useState(restaurant?.allow_custom_tip ?? true);
 
   const [internalAreas, setInternalAreas] = useState([]);
   const areas = areasProp ?? internalAreas;
@@ -148,6 +178,14 @@ export default function SettingsForm({
   const [newDishPreview, setNewDishPreview] = useState("");
   const [newDishStaffOnly, setNewDishStaffOnly] = useState(false);
   const [addingDish, setAddingDish] = useState(false);
+
+  const [internalFees, setInternalFees] = useState([]);
+  const fees = feesProp ?? internalFees;
+  const [newFeeNameEn, setNewFeeNameEn] = useState("");
+  const [newFeeNameAr, setNewFeeNameAr] = useState("");
+  const [newFeeType, setNewFeeType] = useState("percent");
+  const [newFeeAmount, setNewFeeAmount] = useState("");
+  const [addingFee, setAddingFee] = useState(false);
 
   // The one confirm sheet currently pending — { title, description,
   // confirmLabel, onConfirm } | null. Replaces window.confirm() everywhere
@@ -226,10 +264,28 @@ export default function SettingsForm({
     setMenuItems(data || []);
   }, []);
 
+  const loadFees = useCallback(
+    async (restaurantId) => {
+      if (onFeesChanged) {
+        await onFeesChanged();
+        return;
+      }
+      if (!restaurantId) return;
+      const { data } = await supabase
+        .from("restaurant_fees")
+        .select("*")
+        .eq("restaurant_id", restaurantId)
+        .order("sort_order");
+      setInternalFees(data || []);
+    },
+    [onFeesChanged]
+  );
+
   useEffect(() => {
     if (!restaurant) return;
     if (!areasProp) loadAreas(restaurant.id);
     loadMenuItems(restaurant.id);
+    if (!feesProp) loadFees(restaurant.id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurant?.id]);
 
@@ -306,6 +362,95 @@ export default function SettingsForm({
         await loadMenuItems(restaurant.id);
       },
     });
+  }
+
+  async function addFee() {
+    if (!newFeeNameEn.trim() || !newFeeNameAr.trim() || newFeeAmount === "") return;
+    setAddingFee(true);
+    const { error } = await supabase.from("restaurant_fees").insert({
+      restaurant_id: restaurant.id,
+      name_en: newFeeNameEn.trim(),
+      name_ar: newFeeNameAr.trim(),
+      type: newFeeType,
+      amount: Number(newFeeAmount),
+      sort_order: fees.length,
+    });
+    setAddingFee(false);
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setNewFeeNameEn("");
+    setNewFeeNameAr("");
+    setNewFeeType("percent");
+    setNewFeeAmount("");
+    await loadFees(restaurant.id);
+  }
+
+  // Returns true on success so the row can leave edit mode.
+  async function saveFee(fee, patch) {
+    const { error } = await supabase.from("restaurant_fees").update(patch).eq("id", fee.id);
+    if (error) {
+      alert(error.message);
+      return false;
+    }
+    await loadFees(restaurant.id);
+    return true;
+  }
+
+  async function toggleFeeActive(fee) {
+    await supabase.from("restaurant_fees").update({ active: !fee.active }).eq("id", fee.id);
+    await loadFees(restaurant.id);
+  }
+
+  // Swaps this fee's sort_order with its neighbor at `direction` (-1 up,
+  // +1 down) in the currently-sorted list — always computed from the fresh
+  // sorted array, so it stays correct even if two fees ever end up sharing
+  // a sort_order value.
+  async function moveFee(fee, direction) {
+    const idx = fees.findIndex((f) => f.id === fee.id);
+    const otherIdx = idx + direction;
+    if (otherIdx < 0 || otherIdx >= fees.length) return;
+    const other = fees[otherIdx];
+    await Promise.all([
+      supabase.from("restaurant_fees").update({ sort_order: other.sort_order }).eq("id", fee.id),
+      supabase.from("restaurant_fees").update({ sort_order: fee.sort_order }).eq("id", other.id),
+    ]);
+    await loadFees(restaurant.id);
+  }
+
+  function deleteFee(fee) {
+    setConfirmState({
+      title: t("removeFeeConfirmTitle", { name: lang === "ar" ? fee.name_ar : fee.name_en }),
+      confirmLabel: t("remove"),
+      onConfirm: async () => {
+        setConfirmState(null);
+        await supabase.from("restaurant_fees").delete().eq("id", fee.id);
+        await loadFees(restaurant.id);
+      },
+    });
+  }
+
+  // Tip settings save immediately on change, same as fees/areas/menu above
+  // — kept outside the top form's batched sticky-save-bar flow on purpose,
+  // since this whole section lives outside the <form> tag (so a stray
+  // Enter keypress while typing a fee name can't submit it).
+  async function setAcceptTipsImmediate(value) {
+    setAcceptTips(value);
+    await supabase.from("restaurants").update({ accept_tips: value }).eq("id", restaurant.id);
+    onSaved?.({ ...restaurant, accept_tips: value });
+  }
+
+  async function setAllowCustomTipImmediate(value) {
+    setAllowCustomTip(value);
+    await supabase.from("restaurants").update({ allow_custom_tip: value }).eq("id", restaurant.id);
+    onSaved?.({ ...restaurant, allow_custom_tip: value });
+  }
+
+  async function saveTipPercentages(next) {
+    setTipPercentages(next);
+    await supabase.from("restaurants").update({ tip_percentages: next }).eq("id", restaurant.id);
+    onSaved?.({ ...restaurant, tip_percentages: next });
   }
 
   function togglePartySize(size) {
@@ -726,6 +871,132 @@ export default function SettingsForm({
         </SettingsSection>
       )}
 
+      {/* Fees and tips */}
+      {restaurant && (
+        <SettingsSection label={t("feesAndTipsSection")}>
+          <div className="mb-6">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-taupe mb-1">{t("customFeesLabel")}</div>
+            <p className="text-xs text-muted mb-4">{t("feesHelpText")}</p>
+
+            <div className="divide-y divide-charcoal/[0.08] mb-2">
+              {fees.length === 0 && <p className="text-xs text-taupe py-2">{t("noFeesYet")}</p>}
+              {fees.map((fee, i) => (
+                <FeeRow
+                  key={fee.id}
+                  fee={fee}
+                  lang={lang}
+                  onSave={saveFee}
+                  onDelete={deleteFee}
+                  onToggleActive={toggleFeeActive}
+                  onMoveUp={i > 0 ? () => moveFee(fee, -1) : null}
+                  onMoveDown={i < fees.length - 1 ? () => moveFee(fee, 1) : null}
+                  t={t}
+                />
+              ))}
+              <div className="flex items-center justify-between py-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-taupe">{t("vatFixedLabel")}</div>
+                  <div className="text-xs text-taupe">{t("vatFixedHint")}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl p-3 border border-dashed border-taupe/40">
+              <div className="text-[10px] font-bold uppercase tracking-widest text-taupe mb-2">{t("addFee")}</div>
+              <div className="flex flex-col gap-2 mb-2">
+                <input
+                  value={newFeeNameEn}
+                  onChange={(e) => setNewFeeNameEn(e.target.value)}
+                  placeholder={t("feeNameEnPlaceholder")}
+                  className="w-full min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
+                />
+                <input
+                  value={newFeeNameAr}
+                  onChange={(e) => setNewFeeNameAr(e.target.value)}
+                  placeholder={t("feeNameArPlaceholder")}
+                  className="w-full min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewFeeType("percent")}
+                    className={`flex-1 min-h-[44px] rounded-full text-xs font-semibold ${
+                      newFeeType === "percent" ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {t("feeTypePercent")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewFeeType("fixed")}
+                    className={`flex-1 min-h-[44px] rounded-full text-xs font-semibold ${
+                      newFeeType === "fixed" ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+                    }`}
+                  >
+                    {t("feeTypeFixed")}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    value={newFeeAmount}
+                    onChange={(e) => setNewFeeAmount(e.target.value)}
+                    placeholder="0"
+                    className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal placeholder:text-taupe focus:ring-2 focus:ring-burgundy"
+                  />
+                  <span className="text-xs text-taupe flex-shrink-0 w-10">{newFeeType === "percent" ? "%" : t("aedUnit")}</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={addFee}
+                disabled={addingFee || !newFeeNameEn.trim() || !newFeeNameAr.trim() || newFeeAmount === ""}
+                className="w-full min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Plus size={13} /> {addingFee ? t("adding") : t("addFee")}
+              </button>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-charcoal/[0.08]">
+            <div className="text-[10px] font-bold uppercase tracking-widest text-taupe mt-4 mb-1">{t("tipsLabel")}</div>
+            <div className="flex items-center justify-between py-3 border-b border-charcoal/[0.08]">
+              <span className="text-sm font-medium text-charcoal">{t("acceptTipsLabel")}</span>
+              <Switch checked={acceptTips} onChange={setAcceptTipsImmediate} label={t("acceptTipsLabel")} />
+            </div>
+            {acceptTips && (
+              <>
+                <div className="grid grid-cols-3 gap-2 py-4 border-b border-charcoal/[0.08]">
+                  {tipPercentages.map((pct, i) => (
+                    <div key={i}>
+                      <label className={FIELD_LABEL}>{t("tipOptionLabel", { n: i + 1 })}</label>
+                      <div className="flex items-center gap-1 mt-2">
+                        <input
+                          type="number"
+                          min="0"
+                          value={pct}
+                          onChange={(e) =>
+                            setTipPercentages((prev) => prev.map((p, idx) => (idx === i ? e.target.value : p)))
+                          }
+                          onBlur={() => saveTipPercentages(tipPercentages.map((p) => Number(p) || 0))}
+                          className="w-full min-h-[44px] rounded-full px-3 text-sm text-center outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+                        />
+                        <span className="text-xs text-taupe flex-shrink-0">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex items-center justify-between py-3">
+                  <span className="text-sm font-medium text-charcoal">{t("allowCustomTipLabel")}</span>
+                  <Switch checked={allowCustomTip} onChange={setAllowCustomTipImmediate} label={t("allowCustomTipLabel")} />
+                </div>
+              </>
+            )}
+          </div>
+        </SettingsSection>
+      )}
+
       {/* This tablet */}
       <SettingsSection label={t("thisTabletSection")}>
         <div>
@@ -992,6 +1263,142 @@ function MenuItemRow({ item, onSave, onDelete, t }) {
           type="button"
           onClick={handleSave}
           disabled={saving || !name.trim()}
+          className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
+        >
+          {saving ? t("saving") : t("save")}
+        </button>
+        <button type="button" onClick={cancelEdit} className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-tan text-charcoal">
+          {t("cancel")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FeeRow({ fee, lang, onSave, onDelete, onToggleActive, onMoveUp, onMoveDown, t }) {
+  const [editing, setEditing] = useState(false);
+  const [nameEn, setNameEn] = useState(fee.name_en);
+  const [nameAr, setNameAr] = useState(fee.name_ar);
+  const [type, setType] = useState(fee.type);
+  const [amount, setAmount] = useState(fee.amount);
+  const [saving, setSaving] = useState(false);
+
+  function cancelEdit() {
+    setEditing(false);
+    setNameEn(fee.name_en);
+    setNameAr(fee.name_ar);
+    setType(fee.type);
+    setAmount(fee.amount);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    const ok = await onSave(fee, { name_en: nameEn.trim(), name_ar: nameAr.trim(), type, amount: Number(amount) || 0 });
+    setSaving(false);
+    if (ok) setEditing(false);
+  }
+
+  const displayName = lang === "ar" ? fee.name_ar : fee.name_en;
+  const amountLabel = fee.type === "percent" ? `${fee.amount}%` : `AED ${fee.amount}`;
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2 py-3">
+        <div className="flex flex-col flex-shrink-0">
+          <button
+            type="button"
+            onClick={onMoveUp || undefined}
+            disabled={!onMoveUp}
+            aria-label={t("moveUp")}
+            className="w-6 h-5 flex items-center justify-center text-taupe disabled:opacity-20"
+          >
+            <ChevronUp size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={onMoveDown || undefined}
+            disabled={!onMoveDown}
+            aria-label={t("moveDown")}
+            className="w-6 h-5 flex items-center justify-center text-taupe disabled:opacity-20"
+          >
+            <ChevronDown size={14} />
+          </button>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className={`text-sm font-medium truncate ${fee.active ? "text-charcoal" : "text-taupe"}`}>{displayName}</div>
+          <div className="text-xs text-taupe">{amountLabel}</div>
+        </div>
+        <Switch checked={fee.active} onChange={() => onToggleActive(fee)} label={displayName} />
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs font-semibold min-h-[44px] rounded-full px-3 bg-tan text-charcoal flex-shrink-0"
+        >
+          {t("edit")}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(fee)}
+          aria-label={t("remove")}
+          className="w-11 h-11 rounded-full flex items-center justify-center bg-warn/10 text-warn flex-shrink-0"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl p-3 my-1 ring-2 ring-burgundy">
+      <div className="flex flex-col gap-2 mb-2">
+        <input
+          value={nameEn}
+          onChange={(e) => setNameEn(e.target.value)}
+          placeholder={t("feeNameEnPlaceholder")}
+          className="w-full min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+        />
+        <input
+          value={nameAr}
+          onChange={(e) => setNameAr(e.target.value)}
+          placeholder={t("feeNameArPlaceholder")}
+          className="w-full min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+        />
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setType("percent")}
+            className={`flex-1 min-h-[44px] rounded-full text-xs font-semibold ${
+              type === "percent" ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+            }`}
+          >
+            {t("feeTypePercent")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setType("fixed")}
+            className={`flex-1 min-h-[44px] rounded-full text-xs font-semibold ${
+              type === "fixed" ? "bg-burgundy text-offwhite" : "bg-tan text-charcoal"
+            }`}
+          >
+            {t("feeTypeFixed")}
+          </button>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className="flex-1 min-h-[44px] rounded-full px-4 text-sm outline-none bg-tan text-charcoal focus:ring-2 focus:ring-burgundy"
+          />
+          <span className="text-xs text-taupe flex-shrink-0 w-10">{type === "percent" ? "%" : t("aedUnit")}</span>
+        </div>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving || !nameEn.trim() || !nameAr.trim()}
           className="flex-1 min-h-[44px] rounded-full text-xs font-semibold bg-burgundy text-offwhite disabled:opacity-60"
         >
           {saving ? t("saving") : t("save")}

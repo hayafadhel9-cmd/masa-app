@@ -2218,6 +2218,107 @@ no longer exists — see the 2026-08-29 customer-accounts bullet below.)
       silently succeeding — confirmed the INSERT policy from the application layer
       too, not just via SQL.
 
+- **"Fees and tips" added to restaurant dashboard Settings (2026-10-25):** a new
+  settings section covering custom per-restaurant fees (service charge, delivery,
+  etc. — each with an English name, an Arabic name, a type, an amount, and an on/off
+  switch), plus tip acceptance settings, both now flowing through into the receipt
+  diners and staff actually see.
+  - **Custom fees CRUD** (`SettingsForm.js`, new `FeeRow` component): add, edit,
+    reorder (up/down arrows swapping `sort_order` with the adjacent fee in the
+    currently-sorted list, not a fixed stored value — self-heals even if two rows
+    ever end up sharing a sort_order), and remove, the last going through
+    `ConfirmSheet` per the request rather than a raw `confirm()`. Each fee is
+    `type: 'percent' | 'fixed'` with an `amount` (a whole percent of subtotal, or a
+    flat AED amount) and an `active` toggle (the same on/off `Switch` component now
+    reused for all three of this feature's switches — fee active, Accept tips, Allow
+    custom amount — and visually identical to the dashboard shell's own existing
+    "Taking requests" toggle). A non-interactive "VAT — 5% · always applied last ·
+    not editable" row sits at the bottom of the list, after every custom fee,
+    visually enforcing "VAT is added last" since it can never be reordered above
+    them. Fees save immediately (same as seating areas/menu above it), so the whole
+    section — fees *and* tips — lives outside the `<form>` tag that wraps the
+    sticky-save-bar fields, same reason seating areas/menu already do: a stray Enter
+    keypress while typing a fee name must not submit unrelated top-form fields.
+    Tip settings also save immediately (switches on toggle, the three percentages on
+    blur) rather than joining the batched sticky-bar flow, for the same reason.
+  - **Receipt math** (`lib/receipts.js`'s `computeReceiptTotals`, the one function
+    shared by the dashboard's Tonight/Receipts/Analytics tabs and the diner's own
+    Tab screen): now returns `fees`/`feesTotal` alongside the existing
+    `subtotal`/`topUp`/`vat`/`total`. Order is subtotal → minimum-spend top-up (if
+    any, unchanged) → each fee (a percent fee is a % of **subtotal specifically**,
+    per "% of subtotal" in the request — never of the top-up or other fees) → VAT
+    (5% of everything above it: subtotal + top-up + fees) → total — matching the
+    requested receipt order exactly, and reusable everywhere receipts already
+    render: `ReceiptPanel.js` (staff) and `app/page.js`'s `TabReceiptCard` (diner)
+    both just map `totals.fees` into their own line-item lists in that same order,
+    no duplicated math.
+  - **Snapshot so old receipts don't change when settings change**: fees are *not*
+    read live from `restaurant_fees` when a receipt renders — `handleArrive` in
+    `TonightTab.js` freezes the currently-active fees (name_en/name_ar/type/amount,
+    sorted) onto the booking's new `fee_snapshot` jsonb column the moment a tab
+    opens, and `computeReceiptTotals` reads only `booking.fee_snapshot` from then on.
+    A later edit to Settings' fee list — rename, retype, disable, delete — can never
+    retroactively change a tab that already started, and a booking whose tab opened
+    before this feature existed (or has no tab at all) simply has no fees, which is
+    correct (there's nothing to backfill, same reasoning as the 2026-10-24
+    Receipts/Analytics entry's "old historical bookings don't retroactively get
+    receipts" note).
+  - **Analytics**: a new "Fees collected" card (`AnalyticsTab.js`), each fee as its
+    own line summed across every booking's own frozen snapshot in the selected
+    period, grouped by `name_en` as a stable key (a booking keeps its own name even
+    if the fee was renamed since) and shown with its most recent name.
+  - **Data model**: `restaurant_fees` (bilingual name, `type` check-constrained to
+    `percent`/`fixed`, `amount`, `active`, `sort_order`) — **not** public-read, unlike
+    `menu_items`: a diner never needs to query this table directly, since by the
+    time any tab is visible to them it's already been snapshotted onto the booking
+    (see above), so owner-only RLS was enough; `bookings.fee_snapshot` (jsonb,
+    nullable); three new simple columns on `restaurants` for tips
+    (`accept_tips` default true, `tip_percentages` default `{10,15,20}`,
+    `allow_custom_tip` default true). Loaded in the dashboard shell via a new
+    `loadFees`/`fees` pair, duplicating the existing `loadMenuItems`/`menuItems`
+    pattern on purpose — one copy feeds `TonightTab`'s snapshot-at-arrival, a
+    separate copy feeds `SettingsForm`'s own CRUD UI when embedded as a tab, exactly
+    how menu items already work for ReceiptPanel vs. Settings.
+  - Unlike the Tab feature's own build-out, `restaurant_fees`' RLS policies came out
+    clean on the first pass this time — `get_advisors` showed no new findings, and
+    the live `set local role` tests below confirm it. No diner-facing read path was
+    added for the table at all (deliberately — see below), which is also exactly why
+    there was nothing here for the earlier recursion-style bug to trigger on.
+  - **16 new translation keys**, EN/AR (377 total now, parity-checked — no gaps, no
+    duplicates).
+  - **Scope note on tips**: the request's RECEIPTS section spells out the full
+    receipt line order ("items, subtotal, each active fee as its own line, VAT,
+    total") and doesn't mention a tip line anywhere in it — unlike fees, tips have no
+    diner-facing payment flow to attach to yet in this app (card capture is still a
+    prototype text field, no real Stripe integration — see the project's own
+    long-standing note on that). Built the TIPS settings (accept/percentages/custom
+    amount) as real, saved, owner-manageable settings exactly as asked, but
+    deliberately did **not** wire a tip amount into `computeReceiptTotals` or either
+    receipt view, since nothing in the request asked for one and there's no diner
+    payment step yet for a tip to attach to — these settings are ready for a future
+    tipping flow to read, not yet consumed by one.
+  - **Tested**: `restaurant_fees` RLS (owner can insert/select their own fees;
+    a random signed-in user sees 0 rows and gets rejected inserting into someone
+    else's restaurant) verified the same safe way as the Tab feature's own RLS —
+    `set local role` inside transactions that were never committed. The receipt math
+    itself — both the no-top-up and the with-top-up cases, a disabled fee correctly
+    excluded, Analytics' aggregation across two bookings — was verified against real
+    fixture data (a real `restaurant_fees` pair, a real booking with a real
+    `fee_snapshot` and real `order_items`, all inserted via SQL and deleted after)
+    rendered through a throwaway QA route, by hand-checking the arithmetic end to
+    end rather than just confirming numbers appeared: AED 245 subtotal, a 10%
+    service charge (AED 25) + AED 15 delivery, VAT 5% of everything above it
+    (AED 14 with no top-up / AED 17 with a 55 AED top-up), totals of AED 299 and
+    AED 357 respectively — all matched by hand before trusting what rendered.
+    Confirmed in both languages: fee rows, the fixed VAT row, the add-fee form, edit
+    mode, the tip settings and their show/hide toggle, both receipt views, and the
+    Analytics card all mirror correctly in Arabic/RTL, fee names showing in
+    `name_ar` rather than `name_en` throughout. No dashboard-owner login is
+    available in this environment (same constraint as every dashboard-side pass this
+    session), so add/edit/delete/reorder mutations weren't exercised through a real
+    authenticated save — only the RLS layer (which correctly rejects an
+    unauthenticated attempt) and the component rendering/math were verified live.
+
 ## Known limitations / deliberate simplifications (not bugs)
 - **Requests tab's "Respond within" SLA is a fixed 15-minute constant, not configurable
   (2026-10-24):** `RESPOND_WITHIN_MINUTES` in `app/dashboard/_components/RequestsTab.js`.

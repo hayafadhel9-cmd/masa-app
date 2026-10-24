@@ -290,7 +290,7 @@ function sharedWithNames(booking, currentUserId) {
 // progress bar (hidden entirely when no minimum spend applies that night),
 // and the "Shared with…" line. Reused by the Tab screen's Current view and
 // by tapping a Past card to see its full receipt.
-function TabReceiptCard({ booking, currentUserId, statusWord, t }) {
+function TabReceiptCard({ booking, currentUserId, statusWord, lang, t }) {
   const totals = computeReceiptTotals(booking, booking.restaurants);
   const items = booking.order_items || [];
   const shared = sharedWithNames(booking, currentUserId);
@@ -326,6 +326,12 @@ function TabReceiptCard({ booking, currentUserId, statusWord, t }) {
           </div>
         )}
         <div className="border-t border-charcoal/[0.08] pt-3 flex flex-col gap-1.5">
+          {totals.fees.map((fee, i) => (
+            <div key={i} className="flex justify-between text-sm text-muted">
+              <span>{lang === "ar" ? fee.name_ar : fee.name_en}</span>
+              <span>AED {fee.value}</span>
+            </div>
+          ))}
           <div className="flex justify-between text-sm text-muted">
             <span>{t("vatLabel")}</span>
             <span>AED {totals.vat}</span>
@@ -2183,7 +2189,7 @@ export default function DinerPage() {
 
           {tabView === "current" &&
             (currentTabBooking ? (
-              <TabReceiptCard booking={currentTabBooking} currentUserId={user.id} statusWord={t("openStatus")} t={t} />
+              <TabReceiptCard booking={currentTabBooking} currentUserId={user.id} statusWord={t("openStatus")} lang={lang} t={t} />
             ) : (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-sm text-taupe text-center px-6">{t("noOpenTab")}</p>
@@ -2203,6 +2209,7 @@ export default function DinerPage() {
                   booking={viewingPastTab}
                   currentUserId={user.id}
                   statusWord={viewingPastTab.receipt_status === "paid" ? t("receiptPaidStatus") : t("receiptNotPaidStatus")}
+                  lang={lang}
                   t={t}
                 />
               </div>

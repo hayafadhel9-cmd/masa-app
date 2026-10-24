@@ -23,7 +23,7 @@ function periodRange(period) {
   return [toLocalDateStr(addDays(new Date(), -29)), today];
 }
 
-export default function AnalyticsTab({ restaurant, bookings, t }) {
+export default function AnalyticsTab({ restaurant, bookings, lang, t }) {
   const [period, setPeriod] = useState("today");
   const [start, end] = periodRange(period);
 
@@ -64,6 +64,24 @@ export default function AnalyticsTab({ restaurant, bookings, t }) {
     served.forEach((b) => (b.order_items || []).forEach((oi) => counts.set(oi.name, (counts.get(oi.name) || 0) + oi.quantity)));
     return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
   }, [served]);
+
+  // Each custom fee as its own line, summed across every booking's own
+  // frozen fee_snapshot in the window — grouped by name_en (a stable key
+  // even if a fee was renamed since, since each booking keeps its own
+  // snapshot) with the fee's most-recent name shown.
+  const feesBreakdown = useMemo(() => {
+    const totalsByName = new Map();
+    totalsPerBooking.forEach((totals) =>
+      totals.fees.forEach((fee) => {
+        const existing = totalsByName.get(fee.name_en) || { name_en: fee.name_en, name_ar: fee.name_ar, amount: 0 };
+        existing.amount += fee.value;
+        existing.name_en = fee.name_en;
+        existing.name_ar = fee.name_ar;
+        totalsByName.set(fee.name_en, existing);
+      })
+    );
+    return [...totalsByName.values()].sort((a, b) => b.amount - a.amount);
+  }, [totalsPerBooking]);
 
   return (
     <>
@@ -130,6 +148,22 @@ export default function AnalyticsTab({ restaurant, bookings, t }) {
                 <span className="w-5 text-xs font-semibold text-taupe flex-shrink-0">{i + 1}</span>
                 <span className="flex-1 text-sm text-charcoal truncate">{name}</span>
                 <span className="text-xs font-semibold rounded-full px-2.5 py-1 bg-tan text-charcoal flex-shrink-0">{qty}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl p-4 bg-card mt-6">
+        <h3 className="font-serif text-base text-charcoal mb-4">{t("feesCollectedTitle")}</h3>
+        {feesBreakdown.length === 0 ? (
+          <p className="text-sm text-taupe">{t("noAnalyticsData")}</p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {feesBreakdown.map((fee) => (
+              <div key={fee.name_en} className="flex items-center justify-between">
+                <span className="text-sm text-charcoal truncate">{lang === "ar" ? fee.name_ar : fee.name_en}</span>
+                <span className="text-sm font-semibold text-charcoal flex-shrink-0">AED {fee.amount}</span>
               </div>
             ))}
           </div>

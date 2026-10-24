@@ -44,6 +44,11 @@ create table restaurants (
   -- display labels are generated per-locale rather than stored.
   min_spend_aed integer not null default 0,
   min_spend_nights integer[] not null default '{}',
+  -- Tip settings (2026-10-25 Fees and tips), same reasoning as min_spend
+  -- above: simple per-restaurant values with no natural home of their own.
+  accept_tips boolean not null default true,
+  tip_percentages integer[] not null default '{10,15,20}',
+  allow_custom_tip boolean not null default true,
   created_at timestamp with time zone default now()
 );
 
@@ -130,6 +135,13 @@ create table bookings (
   -- natural home on the bookings row itself.
   receipt_status text,                    -- null (no tab) | 'open' | 'paid' | 'not_paid'
   receipt_paid_at timestamp with time zone,
+  -- A frozen copy of the restaurant's active custom fees (2026-10-25 Fees
+  -- and tips) — [{name_en, name_ar, type, amount}], rules not references —
+  -- taken the moment a tab opens (handleArrive in TonightTab.js), so a
+  -- later edit to Settings' fee list never changes a receipt that already
+  -- started. null on every booking whose tab opened before this feature
+  -- existed, and on anything with no tab at all.
+  fee_snapshot jsonb,
   created_at timestamp with time zone default now()
 );
 
@@ -152,6 +164,25 @@ create table order_items (
   created_at timestamp with time zone default now()
 );
 create index idx_order_items_booking on order_items(booking_id);
+
+-- Custom fees a restaurant adds to every bill (e.g. "Service charge"),
+-- shown before VAT, which stays fixed/uneditable (5%, computed in
+-- lib/receipts.js, never stored here). Bilingual name since fees are
+-- diner-facing on their own Tab screen in both languages. Not public-read
+-- (unlike menu_items) — diners only ever see a booking's own
+-- `fee_snapshot`, never this table directly.
+create table restaurant_fees (
+  id uuid primary key default uuid_generate_v4(),
+  restaurant_id uuid not null references restaurants(id) on delete cascade,
+  name_en text not null,
+  name_ar text not null,
+  type text not null check (type in ('percent', 'fixed')),
+  amount integer not null default 0,  -- a whole percent (e.g. 10 = 10%) or a flat AED amount, per type
+  active boolean not null default true,
+  sort_order integer not null default 0,
+  created_at timestamp with time zone default now()
+);
+create index idx_restaurant_fees_restaurant on restaurant_fees(restaurant_id);
 
 -- Guests added to a booking by the diner who made it (Tab feature, "Add
 -- guests" on My Bookings) — gives them read-only access to the booking and
@@ -379,6 +410,25 @@ create policy "Booking participants can view their own order items"
 
 -- Live item updates on the diner's Tab screen as staff add things.
 alter publication supabase_realtime add table order_items;
+
+alter table restaurant_fees enable row level security;
+
+create policy "Owners can view their own fees"
+  on restaurant_fees for select
+  using (exists (select 1 from restaurants where restaurants.id = restaurant_fees.restaurant_id and restaurants.owner_id = auth.uid()));
+
+create policy "Owners can add fees to their own restaurant"
+  on restaurant_fees for insert
+  with check (exists (select 1 from restaurants where restaurants.id = restaurant_fees.restaurant_id and restaurants.owner_id = auth.uid()));
+
+create policy "Owners can update their own fees"
+  on restaurant_fees for update
+  using (exists (select 1 from restaurants where restaurants.id = restaurant_fees.restaurant_id and restaurants.owner_id = auth.uid()))
+  with check (exists (select 1 from restaurants where restaurants.id = restaurant_fees.restaurant_id and restaurants.owner_id = auth.uid()));
+
+create policy "Owners can delete their own fees"
+  on restaurant_fees for delete
+  using (exists (select 1 from restaurants where restaurants.id = restaurant_fees.restaurant_id and restaurants.owner_id = auth.uid()));
 
 alter table booking_guests enable row level security;
 

@@ -9,13 +9,15 @@ import SettingsForm from "./SettingsForm";
 // passes both through rather than letting the form fetch its own copies.
 // The standalone /dashboard/settings page (onboarding + direct access)
 // renders SettingsForm itself instead, with its own heading/back button.
-export default function SettingsTab({ restaurant, areas, onAreasChanged, onRestaurantSaved, onSignOut }) {
+export default function SettingsTab({ restaurant, areas, onAreasChanged, fees, onFeesChanged, onRestaurantSaved, onSignOut }) {
   return (
     <SettingsForm
       restaurant={restaurant}
       showHeading={false}
       areas={areas}
       onAreasChanged={onAreasChanged}
+      fees={fees}
+      onFeesChanged={onFeesChanged}
       onSaved={onRestaurantSaved}
       onSignOut={onSignOut}
     />

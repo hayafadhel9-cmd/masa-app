@@ -62,7 +62,7 @@ function receiptStatusLabel(status, t) {
   return t("receiptOpenStatus");
 }
 
-export default function TonightTab({ restaurant, bookings, lang, t, reload, showToast, openNeedsModal, openReceipt, visitNumbers }) {
+export default function TonightTab({ restaurant, bookings, fees, lang, t, reload, showToast, openNeedsModal, openReceipt, visitNumbers }) {
   const [noShowTarget, setNoShowTarget] = useState(null);
   const today = toLocalDateStr(new Date());
 
@@ -93,9 +93,21 @@ export default function TonightTab({ restaurant, bookings, lang, t, reload, show
     // Arriving a guest opens their tab (receipt_status starts 'open') and
     // immediately surfaces the receipt editor — arriving someone is, in
     // practice, the moment staff seat them and start ordering for them.
+    // Also freezes the restaurant's currently-active fees onto this one
+    // booking (fee_snapshot) — see lib/receipts.js — so a later edit to
+    // Settings' fee list can never change a receipt that already started.
+    const feeSnapshot = (fees || [])
+      .filter((f) => f.active)
+      .sort((a, b) => a.sort_order - b.sort_order)
+      .map((f) => ({ name_en: f.name_en, name_ar: f.name_ar, type: f.type, amount: f.amount }));
     await supabase
       .from("bookings")
-      .update({ arrived: true, arrived_at: new Date().toISOString(), receipt_status: "open" })
+      .update({
+        arrived: true,
+        arrived_at: new Date().toISOString(),
+        receipt_status: "open",
+        fee_snapshot: feeSnapshot,
+      })
       .eq("id", booking.id);
     await reload();
     openReceipt(booking.id);

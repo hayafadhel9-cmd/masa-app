@@ -148,16 +148,22 @@ export default function ReceiptPanel({ booking, restaurant, menuItems, t, lang, 
             <span>{t("subtotalLabel")}</span>
             <span>AED {totals.subtotal}</span>
           </div>
-          <div className="flex justify-between py-1 text-muted">
-            <span>{t("vatLabel")}</span>
-            <span>AED {totals.vat}</span>
-          </div>
           {totals.topUp > 0 && (
             <div className="flex justify-between py-1 text-muted">
               <span>{t("minSpendTopUpLabel")}</span>
               <span>AED {totals.topUp}</span>
             </div>
           )}
+          {totals.fees.map((fee, i) => (
+            <div key={i} className="flex justify-between py-1 text-muted">
+              <span>{lang === "ar" ? fee.name_ar : fee.name_en}</span>
+              <span>AED {fee.value}</span>
+            </div>
+          ))}
+          <div className="flex justify-between py-1 text-muted">
+            <span>{t("vatLabel")}</span>
+            <span>AED {totals.vat}</span>
+          </div>
           <div className="flex justify-between py-1.5 mt-1 border-t border-charcoal/[0.08] font-semibold text-charcoal">
             <span>{t("totalLabel")}</span>
             <span>AED {totals.total}</span>
